@@ -1,0 +1,156 @@
+# am-autotask
+
+[![codecov](https://codecov.io/gh/andrewheberle/am-autotask/graph/badge.svg?token=K1fgnzaogT)](https://codecov.io/gh/andrewheberle/am-autotask)
+[![GitHub version](https://badge.fury.io/gh/andrewheberle%2Fam-autotask.svg?icon=si%3Agithub)](https://badge.fury.io/gh/andrewheberle%2Fam-autotask)
+
+This is a [webhook receiver](https://prometheus.io/docs/alerting/configuration/#webhook_config) for [Alertmanager](https://github.com/prometheus/alertmanager) that creates tickets in [Autotask](https://www.datto.com/products/autotask-psa/).
+
+Each Alertmanager alert group gets one Autotask ticket, raised against the company the group belongs to. As alerts in the group fire and resolve, internal ticket notes record the change, and when the whole group resolves the ticket is completed.
+
+## How it works
+
+- **One ticket per alert group.** A group's ticket is found by its Autotask `externalID`, which is `am:` followed by a hash of Alertmanager's group key. The receiver keeps no database of its own: all state lives in Autotask (see [ADR-0001](docs/adr/0001-autotask-is-the-only-state-store.md)).
+- **Choosing the company.** Each company in Autotask can hold one or more *company selectors* in a Company UDF. They are matched against the notification's `groupLabels`. A group matched by no company, or by more than one, is raised against the configured *catch-all company*; an ambiguous match is explained in the ticket description (see [ADR-0002](docs/adr/0002-company-selectors-live-in-autotask.md)).
+- **Notes only on change.** A note is added when an alert fires that the ticket hasn't recorded yet, or a recorded alert resolves. Re-sends with nothing new (for example on `repeat_interval`) add nothing. The fingerprints of recorded alerts are kept in a Ticket UDF.
+- **Resolution.** When every alert in the group has resolved, a final note is added and the ticket is set to `ticket.resolvedstatus` (default 5, *Complete*).
+- **Closed tickets are never reopened.** If a group fires again after its ticket was completed, including when a technician completed it while alerts were still firing, a new ticket is created that references the previous one.
+- **Retries.** Temporary Autotask failures (timeouts, 5xx, 429) return HTTP 500 so Alertmanager retries the notification. Permanent failures (Autotask rejecting the request) are logged with the payload and acknowledged so they are not retried forever.
+
+See [GLOSSARY.md](GLOSSARY.md) for the terms used here.
+
+## Autotask setup
+
+1. **Create an API user** (security level *API User (system)* or equivalent with access to companies, tickets and ticket notes), and note its user name, secret and API tracking identifier (integration code).
+2. **Create a Company UDF**, by default named `Alertmanager Selectors`. Use a text field (multi-line, if you want several selectors). This holds each company's company selectors.
+3. **Create a Ticket UDF**, by default named `Alertmanager Recorded Alerts`. Use a text field. The receiver manages its contents; it should not be edited by hand.
+4. **Choose the catch-all company**, for example your own company, and note its ID.
+5. **Find the picklist IDs** to use: the priority for each severity, plus any queue, issue type, sub-issue type or category you want. Configuration always uses numeric IDs, never labels, as labels vary by instance and language.
+
+At startup the receiver checks every configured ID against Autotask, along with both UDFs and the catch-all company, and refuses to start if anything is missing or inactive.
+
+### Company selectors
+
+A company's selector UDF holds one [Alertmanager label selector](https://prometheus.io/docs/alerting/latest/configuration/#matcher) per line, using `=`, `!=`, `=~` and `!~`. A selector matches when all of its matchers match the alert group's labels; a company matches when any of its selectors does. For example:
+
+```
+{tenant_id="foo", site="bar"}
+{tenant_id="foo", cluster="xyz"}
+```
+
+Only the notification's **group labels** are matched, so any label used in a selector must be in the Alertmanager route's `group_by`. This guarantees every alert in a group agrees on the routing labels, and a group can't change company as alerts join or leave it. The company is chosen once, when the ticket is created.
+
+Selectors are loaded from Autotask at startup and every `company.refresh` (default 15 minutes). When a group matches no company, they're also reloaded straight away, at most once per `company.missrefresh` (default one minute), so a company tagged a moment ago is picked up. A company whose selectors don't parse is logged and skipped; the rest still load. If a reload fails, the previous selectors stay in use.
+
+## Alertmanager configuration
+
+```yaml
+route:
+  receiver: autotask
+  # labels used in company selectors must be listed here
+  group_by: ["alertname", "tenant_id", "site"]
+
+receivers:
+  - name: autotask
+    webhook_configs:
+      - url: http://am-autotask:8080/webhook
+        # required: without resolved notifications nothing ever resolves
+        send_resolved: true
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /etc/alertmanager/am-autotask-token
+```
+
+Only webhook payload version 4 is accepted; anything else is rejected with HTTP 400 and logged once.
+
+## Configuration
+
+Settings come from command line flags, a YAML file named by `--config`, and environment variables prefixed `AM_AUTOTASK_`, loaded with [configger](https://github.com/andrewheberle/configger). Later sources override earlier ones in this order: flag defaults, configuration file, environment variables, flags given on the command line.
+
+Every setting has a flag. The environment variable for a setting is its flag name in upper case with `.` replaced by `_`, and its value is read the same way as the flag's. For example, `webhook.token` is `AM_AUTOTASK_WEBHOOK_TOKEN`, and `ticket.priorities` is `AM_AUTOTASK_TICKET_PRIORITIES=critical=4,warning=2`. A map such as `ticket.priorities` set by a higher source replaces the map from a lower one; the two are not merged.
+
+### Secrets
+
+Each secret can be given directly or as a path to a file containing it, which suits Docker and Kubernetes secrets. Leading and trailing whitespace is trimmed from files. Setting both forms of the same secret is an error.
+
+| Setting | File setting | Description |
+| --- | --- | --- |
+| `webhook.token` | `webhook.tokenfile` | Bearer token Alertmanager must send. Required: the receiver will not start without it. |
+| `autotask.username` | `autotask.usernamefile` | Autotask API user name. Required. |
+| `autotask.secret` | `autotask.secretfile` | Autotask API secret. Required. |
+| `autotask.integrationcode` | `autotask.integrationcodefile` | Autotask API tracking identifier. Required. |
+
+### Settings
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `listen` | `:8080` | Address to listen on. |
+| `log.level` | `info` | `debug`, `info`, `warn` or `error`. Logs are JSON on stderr. |
+| `autotask.zoneurl` | Autotask's zone information URL | The API zone for the user is discovered here at startup. |
+| `company.catchall` | | ID of the catch-all company. Required. |
+| `company.udf` | `Alertmanager Selectors` | Name of the Company UDF holding company selectors. |
+| `company.refresh` | `15m` | How often company selectors are reloaded. |
+| `company.missrefresh` | `1m` | Minimum time between reloads triggered by a group matching no company. |
+| `ticket.udf` | `Alertmanager Recorded Alerts` | Name of the Ticket UDF holding recorded alerts. |
+| `ticket.priorities` | | Map of severity to priority ID, e.g. `critical: 4`. As a flag or environment variable: `critical=4,warning=2`. |
+| `ticket.defaultpriority` | | Priority ID for severities not in `ticket.priorities`. Required. |
+| `ticket.severitylabel` | `severity` | Common label whose value is looked up in `ticket.priorities`. |
+| `ticket.status` | `1` (*New*) | Status ID of new tickets. |
+| `ticket.type` | `5` (*Alert*) | Ticket type ID of new tickets. |
+| `ticket.source` | `8` (*Monitoring Alert*) | Source ID of new tickets. |
+| `ticket.queue` | | Queue ID of new tickets. Optional. |
+| `ticket.issuetype` | | Issue type ID of new tickets. Optional. |
+| `ticket.subissuetype` | | Sub-issue type ID of new tickets. Optional; requires `ticket.issuetype`. |
+| `ticket.category` | | Ticket category ID. Optional; Autotask's default category applies when unset. |
+| `ticket.duein` | | Due date of new tickets relative to creation, e.g. `4h`. Optional, but Autotask requires a due date unless the ticket category supplies one. |
+| `ticket.resolvedstatus` | `5` (*Complete*) | Status ID set when the whole group resolves. `0` leaves the status unchanged. |
+| `note.type` | `1` (*Task Summary*) | Note type ID of ticket notes. |
+| `note.publish` | `2` (*Internal Project Team*) | Publish (visibility) ID of ticket notes. |
+
+The defaults for status, type, source, note type and publish are Autotask system values, so they exist on every instance. Priorities, queues, issue types and categories differ between instances, so they have no defaults.
+
+### Example
+
+```yaml
+webhook:
+  tokenfile: /run/secrets/webhook-token
+autotask:
+  usernamefile: /run/secrets/autotask-username
+  secretfile: /run/secrets/autotask-secret
+  integrationcodefile: /run/secrets/autotask-integrationcode
+company:
+  catchall: 175
+ticket:
+  priorities:
+    critical: 4
+    warning: 2
+  defaultpriority: 3
+  queue: 8
+  duein: 4h
+```
+
+## Running
+
+### Docker
+
+```sh
+docker run -v ./config.yaml:/etc/am-autotask/config.yaml \
+  ghcr.io/andrewheberle/am-autotask:v0.0.1 --config /etc/am-autotask/config.yaml # x-release-please-version
+```
+
+### Endpoints
+
+| Path | Description |
+| --- | --- |
+| `POST /webhook` | Alertmanager webhook receiver. Requires `Authorization: Bearer <webhook.token>`. |
+| `GET /healthz` | Always `200` while the process is running. |
+| `GET /readyz` | `200` once Autotask has been reached, configuration validated and company selectors loaded. Until then notifications are answered with `500`, so Alertmanager retries them. |
+| `GET /metrics` | Prometheus metrics, prefixed `am_autotask_`: notifications by result, tickets and notes created, Autotask errors by operation and kind (including rate limiting), and the age of the company selectors. |
+
+## Limitations
+
+- The receiver runs as a single instance. Handling of each alert group is serialised in-process, behind an interface so a shared lock can be added to support replicas.
+- If more than one open ticket is ever found for a group, the oldest is used and each other one gets a note naming it and has its `externalID` changed to `am:dup:…` so it is warned only once. Merging is left to a person.
+- The Ticket UDF holds the fingerprints of about 450 alerts. Beyond that a group stops recording individual alerts: a note says so, further changes are not noted, and the group resolving still completes the ticket.
+- An alert only counts as resolved when Alertmanager sends it with `status: resolved`; an alert missing from a notification stays recorded until then, or until the whole group resolves.
+- Autotask limits API use to 10,000 requests an hour per database, shared with every other integration, and three concurrent requests per endpoint. The receiver makes at most three concurrent requests.
