@@ -256,3 +256,23 @@ ticket:
 		}
 	}
 }
+
+func TestTracingExporter(t *testing.T) {
+	if got := load(t, "--config", writeFile(t, "c.yaml", minimalYAML)).TracingExporter; got != "none" {
+		t.Errorf("default TracingExporter = %q, want none", got)
+	}
+
+	for _, v := range []string{"none", "otlp", "console"} {
+		t.Run(v, func(t *testing.T) {
+			t.Setenv("AM_AUTOTASK_TRACING_EXPORTER", v)
+			if got := load(t, "--config", writeFile(t, "c.yaml", minimalYAML)).TracingExporter; got != v {
+				t.Errorf("TracingExporter = %q, want %q", got, v)
+			}
+		})
+	}
+
+	_, err := config.Load([]string{"--config", writeFile(t, "c.yaml", minimalYAML), "--tracing.exporter", "jaeger"})
+	if err == nil || !strings.Contains(err.Error(), "tracing.exporter") {
+		t.Errorf("err = %v, want one naming tracing.exporter", err)
+	}
+}

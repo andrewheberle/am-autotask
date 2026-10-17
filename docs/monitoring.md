@@ -58,6 +58,14 @@ sum by (reason) (increase(am_autotask_catchall_tickets_total[1d]))
 sum(rate(alertmanager_notifications_failed_total{integration="webhook", receiver="autotask"}[5m]))
 ```
 
+## Traces
+
+With [tracing](../README.md#tracing) enabled, each notification is a trace continuing Alertmanager's, and log lines carry its `trace_id`. To find out why a notification was slow or failed:
+
+- Search the logs for the warning or error, and open its `trace_id` in your tracing backend.
+- The `handle notification` span's `am_autotask.outcome` and `am_autotask.failure` attributes say what happened; its children show where the time went, for example waiting on another notification for the same alert group (`lock alert group`) or a slow Autotask operation.
+- `am_autotask.external_id` on the span is the ticket's `externalID`, so the trace and the Autotask ticket can be matched either way.
+
 ## Alerting rules
 
 [am-autotask.rules.yml](../examples/prometheus/am-autotask.rules.yml) holds ready-made rules. They assume:
