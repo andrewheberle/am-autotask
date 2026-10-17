@@ -17,7 +17,7 @@ The external ID is `am:` followed by the first 40 lowercase hex characters of sh
 
 ## Consequences
 
-- A ticket is tied to its group key, so changing Alertmanager's routes or `group_by` leaves the affected groups' open tickets unfound; they must be completed by hand.
+- A ticket is tied to its group key, so changing Alertmanager's routes or `group_by` leaves the affected groups' open tickets unfound. These orphaned tickets are detected by alert fingerprint rather than by tracking when each ticket last received a notification: an alert's fingerprint survives a group key change, and with a supported configuration an alert is in one group at a time, so a firing alert recorded on another group's open ticket has moved. That costs one query per notification with firing alerts (Autotask allows only one UDF condition per ticket query, so every open `am:` ticket is fetched and matched in code) and no extra writes on unchanged re-sends. Tickets whose alerts never fire again under the new key are still left for a person to complete.
 - Each Notification costs at least one Autotask query; the 10,000 requests/hour database-wide limit is shared with every other integration.
 - A Ticket UDF must be created in Autotask before deployment. Its 8,000-character limit caps the recorded alerts at roughly 450; beyond that notes are still written but the diff degrades.
 - On a change, the note is written before the UDF is updated, so a partial failure followed by a retry produces a duplicate note rather than a lost one.

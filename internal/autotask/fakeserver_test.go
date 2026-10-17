@@ -207,7 +207,8 @@ func (f *fakeServer) serve(w http.ResponseWriter, r *http.Request) {
 }
 
 type query struct {
-	Filter []filter `json:"filter"`
+	IncludeFields []string `json:"IncludeFields,omitempty"`
+	Filter        []filter `json:"filter"`
 }
 
 type filter struct {
@@ -238,6 +239,7 @@ func (f *fakeServer) query(w http.ResponseWriter, name string, q query, after in
 	if matched == nil {
 		matched = []entity{}
 	}
+	matched = project(matched, q.IncludeFields)
 
 	f.write(w, http.StatusOK, entity{
 		"items":       matched,
@@ -261,11 +263,42 @@ func matchesAll(e entity, filters []filter) bool {
 			if !present || v == nil || v == "" {
 				return false
 			}
+		case "beginsWith":
+			s, _ := v.(string)
+			if !present || !strings.HasPrefix(strings.ToLower(s), strings.ToLower(fmt.Sprint(flt.Value))) {
+				return false
+			}
 		default:
 			panic("fake server does not support op " + flt.Op)
 		}
 	}
 	return true
+}
+
+// project keeps only the included fields, as Autotask does when
+// IncludeFields is set; UDFs are returned only if named there too.
+func project(items []entity, include []string) []entity {
+	if len(include) == 0 {
+		return items
+	}
+
+	out := make([]entity, 0, len(items))
+	for _, e := range items {
+		p := entity{"userDefinedFields": []entity{}}
+		for _, name := range include {
+			if v, ok := e[name]; ok {
+				p[name] = v
+			}
+		}
+		udfs, _ := e["userDefinedFields"].([]entity)
+		for _, u := range udfs {
+			if slices.Contains(include, u["name"].(string)) {
+				p["userDefinedFields"] = append(p["userDefinedFields"].([]entity), u)
+			}
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 func fieldValue(e entity, flt filter) (any, bool) {

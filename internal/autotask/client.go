@@ -202,8 +202,9 @@ func (u udfValues) get(name string) string {
 }
 
 // query returns every entity matching the filters, following pagination.
-// Autotask returns results ordered by id.
-func query[T any](ctx context.Context, c *Client, entity string, filters []filter) ([]T, error) {
+// Autotask returns results ordered by id. When include is set only those
+// fields are returned; Autotask then omits UDFs not named in it.
+func query[T any](ctx context.Context, c *Client, entity string, filters []filter, include ...string) ([]T, error) {
 	var page struct {
 		Items       []T `json:"items"`
 		PageDetails struct {
@@ -211,7 +212,11 @@ func query[T any](ctx context.Context, c *Client, entity string, filters []filte
 		} `json:"pageDetails"`
 	}
 
-	if err := c.do(ctx, http.MethodPost, c.url("/"+entity+"/query"), map[string]any{"filter": filters}, &page); err != nil {
+	body := map[string]any{"filter": filters}
+	if len(include) > 0 {
+		body["IncludeFields"] = include
+	}
+	if err := c.do(ctx, http.MethodPost, c.url("/"+entity+"/query"), body, &page); err != nil {
 		return nil, fmt.Errorf("querying %s: %w", entity, err)
 	}
 	items := page.Items
@@ -232,6 +237,7 @@ type ticketItem struct {
 	ID                int64     `json:"id"`
 	TicketNumber      string    `json:"ticketNumber"`
 	Status            int       `json:"status"`
+	ExternalID        string    `json:"externalID"`
 	UserDefinedFields udfValues `json:"userDefinedFields"`
 }
 
@@ -240,8 +246,27 @@ func (c *Client) toTicket(t ticketItem) receiver.Ticket {
 		ID:             t.ID,
 		Number:         t.TicketNumber,
 		Status:         t.Status,
+		ExternalID:     t.ExternalID,
 		RecordedAlerts: t.UserDefinedFields.get(c.opts.RecordedAlertsUDF),
 	}
+}
+
+// OpenAlertTickets implements [receiver.Autotask]. Only the fields needed
+// are requested, as every open alert ticket is returned.
+func (c *Client) OpenAlertTickets(ctx context.Context) ([]receiver.Ticket, error) {
+	items, err := query[ticketItem](ctx, c, "Tickets", []filter{
+		{Op: "beginsWith", Field: "externalID", Value: "am:"},
+		{Op: "noteq", Field: "status", Value: completeStatus},
+	}, "id", "ticketNumber", "status", "externalID", c.opts.RecordedAlertsUDF)
+	if err != nil {
+		return nil, err
+	}
+
+	tickets := make([]receiver.Ticket, 0, len(items))
+	for _, t := range items {
+		tickets = append(tickets, c.toTicket(t))
+	}
+	return tickets, nil
 }
 
 // OpenTickets implements [receiver.Autotask].
@@ -303,8 +328,8 @@ type createResponse struct {
 	ItemID int64 `json:"itemId"`
 }
 
-// CreateTicket implements [receiver.Autotask]. The returned ticket has no
-// number as Autotask only returns the new ID.
+// CreateTicket implements [receiver.Autotask]. Autotask only returns the new
+// ID, so the ticket is read back for its number.
 func (c *Client) CreateTicket(ctx context.Context, t receiver.NewTicket) (receiver.Ticket, error) {
 	body := ticketBody{
 		CompanyID:      t.CompanyID,
@@ -332,7 +357,17 @@ func (c *Client) CreateTicket(ctx context.Context, t receiver.NewTicket) (receiv
 		return receiver.Ticket{}, fmt.Errorf("creating ticket: %w", err)
 	}
 
-	return receiver.Ticket{ID: resp.ItemID, Status: t.Status, RecordedAlerts: t.RecordedAlerts}, nil
+	var created struct {
+		Item *ticketItem `json:"item"`
+	}
+	if err := c.do(ctx, http.MethodGet, c.url("/Tickets/"+strconv.FormatInt(resp.ItemID, 10)), nil, &created); err != nil {
+		return receiver.Ticket{}, fmt.Errorf("reading created ticket %d: %w", resp.ItemID, err)
+	}
+	if created.Item == nil {
+		return receiver.Ticket{}, fmt.Errorf("reading created ticket %d: not found", resp.ItemID)
+	}
+
+	return c.toTicket(*created.Item), nil
 }
 
 // UpdateTicket implements [receiver.Autotask].

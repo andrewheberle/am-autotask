@@ -24,7 +24,11 @@ type Metrics struct {
 	ticketsCreated prometheus.Counter
 	notesCreated   prometheus.Counter
 	autotaskErrors *prometheus.CounterVec
+	alertsMoved    prometheus.Counter
+	orphansDone    prometheus.Counter
 }
+
+var _ receiver.Observer = (*Metrics)(nil)
 
 // New registers the collectors. selectorsAge reports the time since company
 // selectors were last loaded.
@@ -47,10 +51,18 @@ func New(selectorsAge func() time.Duration) *Metrics {
 			Namespace: namespace, Name: "autotask_errors_total",
 			Help: "Failed Autotask API operations, by operation and kind (permanent, temporary, rate_limited).",
 		}, []string{"operation", "kind"}),
+		alertsMoved: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: namespace, Name: "alerts_moved_total",
+			Help: "Alerts moved off orphaned tickets onto their alert group's current ticket.",
+		}),
+		orphansDone: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: namespace, Name: "orphaned_tickets_completed_total",
+			Help: "Orphaned tickets completed because all of their alerts moved.",
+		}),
 	}
 
 	m.registry.MustRegister(
-		m.notifications, m.ticketsCreated, m.notesCreated, m.autotaskErrors,
+		m.notifications, m.ticketsCreated, m.notesCreated, m.autotaskErrors, m.alertsMoved, m.orphansDone,
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: namespace, Name: "company_selectors_age_seconds",
 			Help: "Seconds since company selectors were last loaded from Autotask.",
@@ -65,6 +77,16 @@ func New(selectorsAge func() time.Duration) *Metrics {
 // Handler serves the metrics.
 func (m *Metrics) Handler() http.Handler {
 	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})
+}
+
+// AlertsMoved implements [receiver.Observer].
+func (m *Metrics) AlertsMoved(n int) {
+	m.alertsMoved.Add(float64(n))
+}
+
+// OrphanCompleted implements [receiver.Observer].
+func (m *Metrics) OrphanCompleted() {
+	m.orphansDone.Inc()
 }
 
 // ObserveNotification counts a webhook request by result.
@@ -108,6 +130,11 @@ func (i *instrumented) OpenTickets(ctx context.Context, externalID string) ([]re
 func (i *instrumented) PreviousTicket(ctx context.Context, externalID string) (*receiver.Ticket, error) {
 	t, err := i.at.PreviousTicket(ctx, externalID)
 	return t, i.observe("previous_ticket", err)
+}
+
+func (i *instrumented) OpenAlertTickets(ctx context.Context) ([]receiver.Ticket, error) {
+	t, err := i.at.OpenAlertTickets(ctx)
+	return t, i.observe("open_alert_tickets", err)
 }
 
 func (i *instrumented) CreateTicket(ctx context.Context, nt receiver.NewTicket) (receiver.Ticket, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -46,7 +47,23 @@ func (f *fakeAutotask) fail(op string) error {
 }
 
 func (f *fakeAutotask) toTicket(t *fakeTicket) receiver.Ticket {
-	return receiver.Ticket{ID: t.ID, Number: t.Number, Status: t.Status, RecordedAlerts: t.RecordedAlerts}
+	return receiver.Ticket{ID: t.ID, Number: t.Number, Status: t.Status, ExternalID: t.ExternalID, RecordedAlerts: t.RecordedAlerts}
+}
+
+func (f *fakeAutotask) OpenAlertTickets(_ context.Context) ([]receiver.Ticket, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.fail("OpenAlertTickets"); err != nil {
+		return nil, err
+	}
+
+	var out []receiver.Ticket
+	for _, t := range f.tickets {
+		if strings.HasPrefix(t.ExternalID, "am:") && t.Status != completeStatus {
+			out = append(out, f.toTicket(t))
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeAutotask) OpenTickets(_ context.Context, externalID string) ([]receiver.Ticket, error) {

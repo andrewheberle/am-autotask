@@ -65,7 +65,7 @@ func ticketTitle(n Notification) string {
 	return truncate(title, maxTicketTitle)
 }
 
-func ticketDescription(n Notification, firing []Alert, ambiguous []int64, previous *Ticket, overflow bool) string {
+func ticketDescription(n Notification, firing []Alert, ambiguous []int64, previous *Ticket, continues []Ticket, overflow bool) string {
 	var b strings.Builder
 
 	if s := n.CommonAnnotations["summary"]; s != "" {
@@ -89,6 +89,10 @@ func ticketDescription(n Notification, firing []Alert, ambiguous []int64, previo
 	}
 	if previous != nil {
 		fmt.Fprintf(&b, "\nPrevious ticket for this alert group: %s\n", previous.Number)
+	}
+	if len(continues) > 0 {
+		fmt.Fprintf(&b, "\nContinues %s: alerts recorded there now belong to this alert group, usually after a change to Alertmanager's routes or group_by.\n",
+			joinNumbers(continues))
 	}
 	if overflow {
 		b.WriteString("\nNOTE: " + overflowNotice + "\n")
@@ -123,6 +127,38 @@ func noteDescription(n Notification, fired, resolved []Alert, overflow bool) str
 	}
 
 	return truncate(b.String(), maxNoteDescription)
+}
+
+func movedTitle(moved int, current Ticket, emptied bool) string {
+	if emptied {
+		return fmt.Sprintf("All alerts moved to %s", current.Number)
+	}
+	if moved == 1 {
+		return fmt.Sprintf("1 alert moved to %s", current.Number)
+	}
+	return fmt.Sprintf("%d alerts moved to %s", moved, current.Number)
+}
+
+func movedDescription(n Notification, moved []Alert, current Ticket, emptied bool) string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "These alerts now belong to alert group %s, tracked on %s. "+
+		"This usually follows a change to Alertmanager's routes or group_by.\n", formatLabels(n.GroupLabels, nil), current.Number)
+	if emptied {
+		fmt.Fprintf(&b, "No alerts remain on this ticket; further changes are recorded on %s.\n", current.Number)
+	}
+	fmt.Fprintf(&b, "\nMoved (%d):\n", len(moved))
+	writeAlerts(&b, moved, n.GroupLabels)
+
+	return truncate(b.String(), maxNoteDescription)
+}
+
+func joinNumbers(tickets []Ticket) string {
+	s := make([]string, 0, len(tickets))
+	for _, t := range tickets {
+		s = append(s, t.Number)
+	}
+	return strings.Join(s, ", ")
 }
 
 func duplicateDescription(current Ticket) string {

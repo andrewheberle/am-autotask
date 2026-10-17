@@ -126,6 +126,7 @@ func run() error {
 
 	opts := cfg.Receiver
 	opts.Logger = logger
+	opts.Observer = m
 	r, err := receiver.New(m.Instrument(client), cache, receiver.NewMemoryLocker(), opts)
 	if err != nil {
 		return err
