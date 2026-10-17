@@ -154,7 +154,7 @@ docker run -v ./config.yaml:/etc/am-autotask/config.yaml \
 | `POST /webhook` | Alertmanager webhook receiver. Requires `Authorization: Bearer <webhook.token>`. |
 | `GET /healthz` | Always `200` while the process is running. |
 | `GET /readyz` | `200` once Autotask has been reached, configuration validated and company selectors loaded. Until then notifications are answered with `500`, so Alertmanager retries them. |
-| `GET /metrics` | Prometheus metrics, prefixed `am_autotask_`: notifications by result, tickets and notes created, alerts moved off orphaned tickets and orphaned tickets completed, Autotask errors by operation and kind (including rate limiting), and the age of the company selectors. |
+| `GET /metrics` | Prometheus metrics, prefixed `am_autotask_`: notifications by result, tickets and notes created, alerts moved off orphaned tickets and orphaned tickets completed, Autotask errors by operation and kind (including rate limiting), and the age of the company selectors. See [Monitoring](docs/monitoring.md) for what they mean and ready-made alerting rules. |
 
 ## Limitations
 

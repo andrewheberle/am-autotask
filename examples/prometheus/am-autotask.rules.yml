@@ -1,0 +1,120 @@
+# Prometheus alerting rules for self-monitoring am-autotask.
+#
+# These assume am-autotask is scraped with job="am-autotask" and Alertmanager
+# with job="alertmanager", and that the Alertmanager receiver pointing at
+# am-autotask is named "autotask". Adjust the selectors to match.
+#
+# Route these alerts to a receiver other than am-autotask: a broken
+# am-autotask cannot raise a ticket about itself. See docs/monitoring.md.
+groups:
+  - name: am-autotask
+    rules:
+      - alert: AmAutotaskDown
+        expr: up{job="am-autotask"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: am-autotask is down
+          description: Prometheus cannot scrape {{ $labels.instance }}. Alerts are not becoming Autotask tickets.
+          runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskdown
+
+      - alert: AmAutotaskAbsent
+        expr: absent(up{job="am-autotask"})
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: am-autotask is not being scraped
+          description: No am-autotask target has been discovered for 15 minutes, so none of the other am-autotask alerts can fire.
+          runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskabsent
+
+      - alert: AlertmanagerAutotaskNotificationsFailing
+        expr: |
+          sum by (instance) (rate(alertmanager_notifications_failed_total{job="alertmanager", integration="webhook", receiver="autotask"}[5m])) > 0
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: Alertmanager cannot deliver to am-autotask
+          description: Alertmanager {{ $labels.instance }} has been failing to deliver notifications to am-autotask for 15 minutes. Deliveries are retried, but alerts are not reaching Autotask.
+          runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#alertmanagerautotasknotificationsfailing
+
+      - alert: AmAutotaskPermanentFailures
+        expr: sum by (instance) (increase(am_autotask_notifications_total{job="am-autotask", result="permanent_failure"}[15m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: am-autotask is dropping notifications Autotask rejected
+          description: Notifications to {{ $labels.instance }} failed in a way retrying cannot fix and were acknowledged without reaching Autotask. Their payloads are in its logs.
+          runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskpermanentfailures
+
+      - alert: AmAutotaskTemporaryFailures
+        expr: |
+          sum by (instance) (rate(am_autotask_notifications_total{job="am-autotask", result="temporary_failure"}[10m]))
+            /
+          sum by (instance) (rate(am_autotask_notifications_total{job="am-autotask"}[10m]))
+            > 0.25
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: am-autotask is failing to update Autotask
+          description: '{{ $value | humanizePercentage }} of notifications on {{ $labels.instance }} are failing temporarily. Alertmanager is retrying them, but tickets are falling behind.'
+          runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotasktemporaryfailures
+
+      - alert: AmAutotaskRateLimited
+        expr: sum by (instance) (increase(am_autotask_autotask_errors_total{job="am-autotask", kind="rate_limited"}[15m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: Autotask is rate limiting am-autotask
+          description: Autotask has been returning HTTP 429 to {{ $labels.instance }} in the last 15 minutes. Its request limits are shared by every integration on the Autotask database.
+          runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskratelimited
+
+      - alert: AmAutotaskUnauthorizedRequests
+        expr: sum by (instance) (increase(am_autotask_notifications_total{job="am-autotask", result="unauthorized"}[15m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: am-autotask is rejecting requests without a valid token
+          description: Requests to {{ $labels.instance }} in the last 15 minutes had a missing or wrong bearer token.
+          runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskunauthorizedrequests
+
+      - alert: AmAutotaskInvalidNotifications
+        expr: sum by (instance) (increase(am_autotask_notifications_total{job="am-autotask", result="invalid"}[15m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: am-autotask is rejecting malformed notifications
+          description: Notifications to {{ $labels.instance }} in the last 15 minutes were malformed or used an unsupported webhook version.
+          runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskinvalidnotifications
+
+      - alert: AmAutotaskCompanySelectorsStale
+        # three missed refreshes at the default company.refresh of 15m
+        expr: am_autotask_company_selectors_age_seconds{job="am-autotask"} > 45 * 60
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: am-autotask company selectors are out of date
+          description: Company selectors on {{ $labels.instance }} were last loaded from Autotask {{ $value | humanizeDuration }} ago. Changes to company selectors are not being picked up.
+          runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskcompanyselectorsstale
+
+      - alert: AmAutotaskRestarting
+        expr: changes(process_start_time_seconds{job="am-autotask"}[1h]) > 3
+        labels:
+          severity: warning
+        annotations:
+          summary: am-autotask is restarting repeatedly
+          description: '{{ $labels.instance }} has restarted {{ $value }} times in the last hour.'
+          runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskrestarting
+
+      - alert: AmAutotaskAlertsMoved
+        expr: sum by (instance) (increase(am_autotask_alerts_moved_total{job="am-autotask"}[1h])) > 0
+        labels:
+          severity: info
+        annotations:
+          summary: Alerts moved off orphaned tickets
+          description: Alerts on {{ $labels.instance }} moved to new tickets in the last hour, usually after a change to Alertmanager's routes or group_by. Check for orphaned tickets left open.
+          runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskalertsmoved

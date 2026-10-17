@@ -1,0 +1,41 @@
+name: alerting rules
+on:
+  pull_request:
+    paths:
+      - 'examples/prometheus/**'
+      - '.github/workflows/rules.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  promtool:
+    name: promtool
+    runs-on: ubuntu-latest
+    env:
+      # renovate: datasource=github-releases depName=prometheus/prometheus
+      PROMETHEUS_VERSION: v3.15.0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install promtool
+        run: |
+          version="${PROMETHEUS_VERSION#v}"
+          archive="prometheus-${version}.linux-amd64.tar.gz"
+          base="https://github.com/prometheus/prometheus/releases/download/${PROMETHEUS_VERSION}"
+          mkdir -p "$RUNNER_TEMP/prometheus"
+          cd "$RUNNER_TEMP/prometheus"
+          curl -sSfLO "$base/$archive"
+          curl -sSfLO "$base/sha256sums.txt"
+          grep " ${archive}\$" sha256sums.txt | sha256sum -c -
+          tar -xzf "$archive" --strip-components=1 "prometheus-${version}.linux-amd64/promtool"
+          echo "$RUNNER_TEMP/prometheus" >> "$GITHUB_PATH"
+
+      - name: Check rules
+        run: promtool check rules examples/prometheus/am-autotask.rules.yml
+
+      - name: Test rules
+        run: promtool test rules examples/prometheus/am-autotask.rules.test.yml

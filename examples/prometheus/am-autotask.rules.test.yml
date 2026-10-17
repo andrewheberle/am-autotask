@@ -1,0 +1,261 @@
+# Unit tests for am-autotask.rules.yml:
+#   promtool test rules examples/prometheus/am-autotask.rules.test.yml
+rule_files:
+  - am-autotask.rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: healthy operation raises nothing
+    interval: 1m
+    input_series:
+      - series: 'up{job="am-autotask", instance="am-autotask:8080"}'
+        values: '1x60'
+      - series: 'up{job="alertmanager", instance="alertmanager:9093"}'
+        values: '1x60'
+      - series: 'am_autotask_notifications_total{job="am-autotask", instance="am-autotask:8080", result="handled"}'
+        values: '0+3x60'
+      - series: 'am_autotask_notifications_total{job="am-autotask", instance="am-autotask:8080", result="temporary_failure"}'
+        values: '0x60'
+      - series: 'alertmanager_notifications_failed_total{job="alertmanager", instance="alertmanager:9093", integration="webhook", receiver="autotask"}'
+        values: '0x60'
+      # reloaded every 15 minutes
+      - series: 'am_autotask_company_selectors_age_seconds{job="am-autotask", instance="am-autotask:8080"}'
+        values: '0+60x14 0+60x14 0+60x14 0+60x14'
+      - series: 'process_start_time_seconds{job="am-autotask", instance="am-autotask:8080"}'
+        values: '1000x60'
+    alert_rule_test:
+      - {eval_time: 50m, alertname: AmAutotaskDown, exp_alerts: []}
+      - {eval_time: 50m, alertname: AmAutotaskAbsent, exp_alerts: []}
+      - {eval_time: 50m, alertname: AlertmanagerAutotaskNotificationsFailing, exp_alerts: []}
+      - {eval_time: 50m, alertname: AmAutotaskPermanentFailures, exp_alerts: []}
+      - {eval_time: 50m, alertname: AmAutotaskTemporaryFailures, exp_alerts: []}
+      - {eval_time: 50m, alertname: AmAutotaskRateLimited, exp_alerts: []}
+      - {eval_time: 50m, alertname: AmAutotaskUnauthorizedRequests, exp_alerts: []}
+      - {eval_time: 50m, alertname: AmAutotaskInvalidNotifications, exp_alerts: []}
+      - {eval_time: 50m, alertname: AmAutotaskCompanySelectorsStale, exp_alerts: []}
+      - {eval_time: 50m, alertname: AmAutotaskRestarting, exp_alerts: []}
+      - {eval_time: 50m, alertname: AmAutotaskAlertsMoved, exp_alerts: []}
+
+  - name: down
+    interval: 1m
+    input_series:
+      - series: 'up{job="am-autotask", instance="am-autotask:8080"}'
+        values: '1 0x10'
+    alert_rule_test:
+      # pending until down for 5 minutes
+      - eval_time: 3m
+        alertname: AmAutotaskDown
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: AmAutotaskDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: am-autotask
+              instance: am-autotask:8080
+            exp_annotations:
+              summary: am-autotask is down
+              description: Prometheus cannot scrape am-autotask:8080. Alerts are not becoming Autotask tickets.
+              runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskdown
+
+  - name: absent
+    interval: 1m
+    input_series:
+      - series: 'up{job="something-else", instance="other:9100"}'
+        values: '1x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: AmAutotaskAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: am-autotask
+            exp_annotations:
+              summary: am-autotask is not being scraped
+              description: No am-autotask target has been discovered for 15 minutes, so none of the other am-autotask alerts can fire.
+              runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskabsent
+
+  - name: alertmanager cannot deliver
+    interval: 1m
+    input_series:
+      - series: 'alertmanager_notifications_failed_total{job="alertmanager", instance="alertmanager:9093", integration="webhook", receiver="autotask"}'
+        values: '0+1x30'
+      # failures to other receivers are not am-autotask's concern
+      - series: 'alertmanager_notifications_failed_total{job="alertmanager", instance="alertmanager:9093", integration="email", receiver="email"}'
+        values: '0+1x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: AlertmanagerAutotaskNotificationsFailing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: alertmanager:9093
+            exp_annotations:
+              summary: Alertmanager cannot deliver to am-autotask
+              description: Alertmanager alertmanager:9093 has been failing to deliver notifications to am-autotask for 15 minutes. Deliveries are retried, but alerts are not reaching Autotask.
+              runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#alertmanagerautotasknotificationsfailing
+
+  - name: permanent failure
+    interval: 1m
+    input_series:
+      - series: 'am_autotask_notifications_total{job="am-autotask", instance="am-autotask:8080", result="permanent_failure"}'
+        values: '0 0 1x30'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: AmAutotaskPermanentFailures
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: am-autotask:8080
+            exp_annotations:
+              summary: am-autotask is dropping notifications Autotask rejected
+              description: Notifications to am-autotask:8080 failed in a way retrying cannot fix and were acknowledged without reaching Autotask. Their payloads are in its logs.
+              runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskpermanentfailures
+      # clears once 15 minutes pass without another
+      - eval_time: 25m
+        alertname: AmAutotaskPermanentFailures
+        exp_alerts: []
+
+  - name: temporary failures above a quarter of notifications
+    interval: 1m
+    input_series:
+      - series: 'am_autotask_notifications_total{job="am-autotask", instance="am-autotask:8080", result="handled"}'
+        values: '0+5x40'
+      - series: 'am_autotask_notifications_total{job="am-autotask", instance="am-autotask:8080", result="temporary_failure"}'
+        values: '0+5x40'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: AmAutotaskTemporaryFailures
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: am-autotask:8080
+            exp_annotations:
+              summary: am-autotask is failing to update Autotask
+              description: 50% of notifications on am-autotask:8080 are failing temporarily. Alertmanager is retrying them, but tickets are falling behind.
+              runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotasktemporaryfailures
+
+  - name: occasional temporary failures are tolerated
+    interval: 1m
+    input_series:
+      - series: 'am_autotask_notifications_total{job="am-autotask", instance="am-autotask:8080", result="handled"}'
+        values: '0+9x40'
+      - series: 'am_autotask_notifications_total{job="am-autotask", instance="am-autotask:8080", result="temporary_failure"}'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: AmAutotaskTemporaryFailures
+        exp_alerts: []
+
+  - name: rate limited
+    interval: 1m
+    input_series:
+      - series: 'am_autotask_autotask_errors_total{job="am-autotask", instance="am-autotask:8080", operation="create_note", kind="rate_limited"}'
+        values: '0 0 1x30'
+      - series: 'am_autotask_autotask_errors_total{job="am-autotask", instance="am-autotask:8080", operation="create_note", kind="temporary"}'
+        values: '0 0 5x30'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: AmAutotaskRateLimited
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: am-autotask:8080
+            exp_annotations:
+              summary: Autotask is rate limiting am-autotask
+              description: Autotask has been returning HTTP 429 to am-autotask:8080 in the last 15 minutes. Its request limits are shared by every integration on the Autotask database.
+              runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskratelimited
+
+  - name: unauthorized requests
+    interval: 1m
+    input_series:
+      - series: 'am_autotask_notifications_total{job="am-autotask", instance="am-autotask:8080", result="unauthorized"}'
+        values: '0 0 1x30'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: AmAutotaskUnauthorizedRequests
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: am-autotask:8080
+            exp_annotations:
+              summary: am-autotask is rejecting requests without a valid token
+              description: Requests to am-autotask:8080 in the last 15 minutes had a missing or wrong bearer token.
+              runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskunauthorizedrequests
+
+  - name: invalid notifications
+    interval: 1m
+    input_series:
+      - series: 'am_autotask_notifications_total{job="am-autotask", instance="am-autotask:8080", result="invalid"}'
+        values: '0 0 1x30'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: AmAutotaskInvalidNotifications
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: am-autotask:8080
+            exp_annotations:
+              summary: am-autotask is rejecting malformed notifications
+              description: Notifications to am-autotask:8080 in the last 15 minutes were malformed or used an unsupported webhook version.
+              runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskinvalidnotifications
+
+  - name: company selectors stale
+    interval: 1m
+    input_series:
+      # refreshes keep failing, so the age keeps growing
+      - series: 'am_autotask_company_selectors_age_seconds{job="am-autotask", instance="am-autotask:8080"}'
+        values: '0+60x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: AmAutotaskCompanySelectorsStale
+        exp_alerts: []
+      - eval_time: 52m
+        alertname: AmAutotaskCompanySelectorsStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: am-autotask
+              instance: am-autotask:8080
+            exp_annotations:
+              summary: am-autotask company selectors are out of date
+              description: Company selectors on am-autotask:8080 were last loaded from Autotask 52m 0s ago. Changes to company selectors are not being picked up.
+              runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskcompanyselectorsstale
+
+  - name: restarting
+    interval: 1m
+    input_series:
+      - series: 'process_start_time_seconds{job="am-autotask", instance="am-autotask:8080"}'
+        values: '100 100 200 300 400 500 500x60'
+      - series: 'process_start_time_seconds{job="am-autotask", instance="am-autotask-b:8080"}'
+        values: '100 100 200 200 300 300x60'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: AmAutotaskRestarting
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: am-autotask
+              instance: am-autotask:8080
+            exp_annotations:
+              summary: am-autotask is restarting repeatedly
+              description: am-autotask:8080 has restarted 4 times in the last hour.
+              runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskrestarting
+
+  - name: alerts moved
+    interval: 1m
+    input_series:
+      - series: 'am_autotask_alerts_moved_total{job="am-autotask", instance="am-autotask:8080"}'
+        values: '0 0 2x70'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: AmAutotaskAlertsMoved
+        exp_alerts:
+          - exp_labels:
+              severity: info
+              instance: am-autotask:8080
+            exp_annotations:
+              summary: Alerts moved off orphaned tickets
+              description: Alerts on am-autotask:8080 moved to new tickets in the last hour, usually after a change to Alertmanager's routes or group_by. Check for orphaned tickets left open.
+              runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskalertsmoved
