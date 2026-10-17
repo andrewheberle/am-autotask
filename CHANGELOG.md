@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/andrewheberle/am-autotask/compare/v0.1.0...v0.2.0) (2026-10-17)
+
+
+### Features
+
+* hand alerts over from orphaned tickets ([#7](https://github.com/andrewheberle/am-autotask/issues/7)) ([071977d](https://github.com/andrewheberle/am-autotask/commit/071977d88aa41580d7b700f9260a969d868f8e22))
+
 ## [0.1.0](https://github.com/andrewheberle/am-autotask/compare/v0.0.1...v0.1.0) (2026-10-17)
 
 
