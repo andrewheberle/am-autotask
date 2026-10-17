@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/andrewheberle/am-autotask/compare/v0.2.0...v0.3.0) (2026-10-17)
+
+
+### Features
+
+* add catch-all, readiness, selector validity and latency metrics ([#10](https://github.com/andrewheberle/am-autotask/issues/10)) ([a5810d4](https://github.com/andrewheberle/am-autotask/commit/a5810d4b443a4c257e7976d2f06c102956caa6d8))
+
 ## [0.2.0](https://github.com/andrewheberle/am-autotask/compare/v0.1.0...v0.2.0) (2026-10-17)
 
 
