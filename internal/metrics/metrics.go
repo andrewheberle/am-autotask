@@ -26,13 +26,25 @@ type Metrics struct {
 	autotaskErrors *prometheus.CounterVec
 	alertsMoved    prometheus.Counter
 	orphansDone    prometheus.Counter
+	catchAll       *prometheus.CounterVec
+	duration       *prometheus.HistogramVec
 }
 
 var _ receiver.Observer = (*Metrics)(nil)
 
-// New registers the collectors. selectorsAge reports the time since company
-// selectors were last loaded.
-func New(selectorsAge func() time.Duration) *Metrics {
+// Options supplies the state reported by gauges, read at each scrape.
+type Options struct {
+	// SelectorsAge returns the time since company selectors were last loaded.
+	SelectorsAge func() time.Duration
+	// SelectorCounts returns the number of companies whose selectors were
+	// valid and invalid in the last load.
+	SelectorCounts func() (valid, invalid int)
+	// Ready reports whether startup has completed.
+	Ready func() bool
+}
+
+// New registers the collectors.
+func New(opts Options) *Metrics {
 	m := &Metrics{
 		registry: prometheus.NewRegistry(),
 		notifications: prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -59,14 +71,48 @@ func New(selectorsAge func() time.Duration) *Metrics {
 			Namespace: namespace, Name: "orphaned_tickets_completed_total",
 			Help: "Orphaned tickets completed because all of their alerts moved.",
 		}),
+		catchAll: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace, Name: "catchall_tickets_total",
+			Help: "Tickets raised against the catch-all company, by reason (unmatched, ambiguous).",
+		}, []string{"reason"}),
+		duration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: namespace, Name: "autotask_request_duration_seconds",
+			Help:    "Duration of Autotask API operations made while handling notifications, including paging, by operation.",
+			Buckets: prometheus.ExponentialBuckets(0.1, 2, 10),
+		}, []string{"operation"}),
+	}
+
+	// start the known label values at zero so rates work from the first scrape
+	for _, reason := range []string{receiver.CatchAllUnmatched, receiver.CatchAllAmbiguous} {
+		m.catchAll.WithLabelValues(reason)
+	}
+
+	selectorCount := func(state string, pick func(valid, invalid int) int) prometheus.Collector {
+		return prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: namespace, Name: "company_selectors_companies",
+			Help:        "Companies with company selectors in the last load from Autotask, by state (valid, or invalid and skipped).",
+			ConstLabels: prometheus.Labels{"state": state},
+		}, func() float64 { return float64(pick(opts.SelectorCounts())) })
 	}
 
 	m.registry.MustRegister(
 		m.notifications, m.ticketsCreated, m.notesCreated, m.autotaskErrors, m.alertsMoved, m.orphansDone,
+		m.catchAll, m.duration,
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: namespace, Name: "company_selectors_age_seconds",
 			Help: "Seconds since company selectors were last loaded from Autotask.",
-		}, func() float64 { return selectorsAge().Seconds() }),
+		}, func() float64 { return opts.SelectorsAge().Seconds() }),
+		selectorCount("valid", func(valid, _ int) int { return valid }),
+		selectorCount("invalid", func(_, invalid int) int { return invalid }),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: namespace, Name: "ready",
+			Help: "1 once startup has completed and notifications are being handled, otherwise 0.",
+		}, func() float64 {
+			if opts.Ready() {
+				return 1
+			}
+			return 0
+		}),
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
@@ -77,6 +123,11 @@ func New(selectorsAge func() time.Duration) *Metrics {
 // Handler serves the metrics.
 func (m *Metrics) Handler() http.Handler {
 	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})
+}
+
+// CatchAll implements [receiver.Observer].
+func (m *Metrics) CatchAll(reason string) {
+	m.catchAll.WithLabelValues(reason).Inc()
 }
 
 // AlertsMoved implements [receiver.Observer].
@@ -115,7 +166,9 @@ type instrumented struct {
 	m  *Metrics
 }
 
-func (i *instrumented) observe(operation string, err error) error {
+// observe records an operation's duration and, if it failed, its error.
+func (i *instrumented) observe(operation string, start time.Time, err error) error {
+	i.m.duration.WithLabelValues(operation).Observe(time.Since(start).Seconds())
 	if err != nil {
 		i.m.observeError(operation, err)
 	}
@@ -123,36 +176,43 @@ func (i *instrumented) observe(operation string, err error) error {
 }
 
 func (i *instrumented) OpenTickets(ctx context.Context, externalID string) ([]receiver.Ticket, error) {
+	start := time.Now()
 	t, err := i.at.OpenTickets(ctx, externalID)
-	return t, i.observe("open_tickets", err)
+	return t, i.observe("open_tickets", start, err)
 }
 
 func (i *instrumented) PreviousTicket(ctx context.Context, externalID string) (*receiver.Ticket, error) {
+	start := time.Now()
 	t, err := i.at.PreviousTicket(ctx, externalID)
-	return t, i.observe("previous_ticket", err)
+	return t, i.observe("previous_ticket", start, err)
 }
 
 func (i *instrumented) OpenAlertTickets(ctx context.Context) ([]receiver.Ticket, error) {
+	start := time.Now()
 	t, err := i.at.OpenAlertTickets(ctx)
-	return t, i.observe("open_alert_tickets", err)
+	return t, i.observe("open_alert_tickets", start, err)
 }
 
 func (i *instrumented) CreateTicket(ctx context.Context, nt receiver.NewTicket) (receiver.Ticket, error) {
+	start := time.Now()
 	t, err := i.at.CreateTicket(ctx, nt)
 	if err == nil {
 		i.m.ticketsCreated.Inc()
 	}
-	return t, i.observe("create_ticket", err)
+	return t, i.observe("create_ticket", start, err)
 }
 
 func (i *instrumented) CreateNote(ctx context.Context, n receiver.NewNote) error {
+	start := time.Now()
 	err := i.at.CreateNote(ctx, n)
 	if err == nil {
 		i.m.notesCreated.Inc()
 	}
-	return i.observe("create_note", err)
+	return i.observe("create_note", start, err)
 }
 
 func (i *instrumented) UpdateTicket(ctx context.Context, id int64, u receiver.TicketUpdate) error {
-	return i.observe("update_ticket", i.at.UpdateTicket(ctx, id, u))
+	start := time.Now()
+	err := i.at.UpdateTicket(ctx, id, u)
+	return i.observe("update_ticket", start, err)
 }

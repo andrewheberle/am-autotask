@@ -24,6 +24,21 @@ tests:
         values: '0+60x14 0+60x14 0+60x14 0+60x14'
       - series: 'process_start_time_seconds{job="am-autotask", instance="am-autotask:8080"}'
         values: '1000x60'
+      - series: 'am_autotask_ready{job="am-autotask", instance="am-autotask:8080"}'
+        values: '1x60'
+      - series: 'am_autotask_catchall_tickets_total{job="am-autotask", instance="am-autotask:8080", reason="unmatched"}'
+        values: '0x60'
+      - series: 'am_autotask_catchall_tickets_total{job="am-autotask", instance="am-autotask:8080", reason="ambiguous"}'
+        values: '0x60'
+      - series: 'am_autotask_company_selectors_companies{job="am-autotask", instance="am-autotask:8080", state="valid"}'
+        values: '40x60'
+      - series: 'am_autotask_company_selectors_companies{job="am-autotask", instance="am-autotask:8080", state="invalid"}'
+        values: '0x60'
+      # every request completes within 0.4s
+      - series: 'am_autotask_autotask_request_duration_seconds_bucket{job="am-autotask", instance="am-autotask:8080", operation="open_tickets", le="0.4"}'
+        values: '0+10x60'
+      - series: 'am_autotask_autotask_request_duration_seconds_bucket{job="am-autotask", instance="am-autotask:8080", operation="open_tickets", le="+Inf"}'
+        values: '0+10x60'
     alert_rule_test:
       - {eval_time: 50m, alertname: AmAutotaskDown, exp_alerts: []}
       - {eval_time: 50m, alertname: AmAutotaskAbsent, exp_alerts: []}
@@ -36,6 +51,11 @@ tests:
       - {eval_time: 50m, alertname: AmAutotaskCompanySelectorsStale, exp_alerts: []}
       - {eval_time: 50m, alertname: AmAutotaskRestarting, exp_alerts: []}
       - {eval_time: 50m, alertname: AmAutotaskAlertsMoved, exp_alerts: []}
+      - {eval_time: 50m, alertname: AmAutotaskNotReady, exp_alerts: []}
+      - {eval_time: 50m, alertname: AmAutotaskSlowAutotask, exp_alerts: []}
+      - {eval_time: 50m, alertname: AmAutotaskAmbiguousCompanyMatch, exp_alerts: []}
+      - {eval_time: 50m, alertname: AmAutotaskUnmatchedAlertGroups, exp_alerts: []}
+      - {eval_time: 50m, alertname: AmAutotaskInvalidCompanySelectors, exp_alerts: []}
 
   - name: down
     interval: 1m
@@ -259,3 +279,124 @@ tests:
               summary: Alerts moved off orphaned tickets
               description: Alerts on am-autotask:8080 moved to new tickets in the last hour, usually after a change to Alertmanager's routes or group_by. Check for orphaned tickets left open.
               runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskalertsmoved
+
+  - name: not ready
+    interval: 1m
+    input_series:
+      - series: 'am_autotask_ready{job="am-autotask", instance="am-autotask:8080"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: AmAutotaskNotReady
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: AmAutotaskNotReady
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: am-autotask
+              instance: am-autotask:8080
+            exp_annotations:
+              summary: am-autotask has not finished starting
+              description: am-autotask:8080 has been running for 10 minutes without becoming ready, so it is answering notifications with errors.
+              runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotasknotready
+
+  - name: slow autotask
+    interval: 1m
+    input_series:
+      # every request takes between 6.4s and 12.8s
+      - series: 'am_autotask_autotask_request_duration_seconds_bucket{job="am-autotask", instance="am-autotask:8080", operation="create_note", le="6.4"}'
+        values: '0x40'
+      - series: 'am_autotask_autotask_request_duration_seconds_bucket{job="am-autotask", instance="am-autotask:8080", operation="create_note", le="12.8"}'
+        values: '0+10x40'
+      - series: 'am_autotask_autotask_request_duration_seconds_bucket{job="am-autotask", instance="am-autotask:8080", operation="create_note", le="+Inf"}'
+        values: '0+10x40'
+    alert_rule_test:
+      # the 95th percentile interpolates to 6.4 + 0.95 * 6.4 = 12.48 seconds
+      - eval_time: 30m
+        alertname: AmAutotaskSlowAutotask
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: am-autotask:8080
+            exp_annotations:
+              summary: Autotask requests are slow
+              description: The slowest 5% of Autotask requests from am-autotask:8080 are taking longer than 12.48s. Notifications are being handled slowly.
+              runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskslowautotask
+
+  - name: ambiguous company match
+    interval: 1m
+    input_series:
+      - series: 'am_autotask_catchall_tickets_total{job="am-autotask", instance="am-autotask:8080", reason="ambiguous"}'
+        values: '0 0 1x70'
+      - series: 'am_autotask_catchall_tickets_total{job="am-autotask", instance="am-autotask:8080", reason="unmatched"}'
+        values: '0x70'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: AmAutotaskAmbiguousCompanyMatch
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: am-autotask:8080
+            exp_annotations:
+              summary: Alert groups match more than one company
+              description: Tickets on am-autotask:8080 in the last hour were raised against the catch-all company because their alert group matched the company selectors of more than one company.
+              runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskambiguouscompanymatch
+      - eval_time: 5m
+        alertname: AmAutotaskUnmatchedAlertGroups
+        exp_alerts: []
+
+  - name: unmatched alert groups
+    interval: 1m
+    input_series:
+      - series: 'am_autotask_catchall_tickets_total{job="am-autotask", instance="am-autotask:8080", reason="unmatched"}'
+        values: '0 0 1x70'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: AmAutotaskUnmatchedAlertGroups
+        exp_alerts:
+          - exp_labels:
+              severity: info
+              instance: am-autotask:8080
+            exp_annotations:
+              summary: Alert groups match no company
+              description: Tickets on am-autotask:8080 in the last hour were raised against the catch-all company because their alert group matched no company's selectors.
+              runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskunmatchedalertgroups
+
+  - name: invalid company selectors
+    interval: 1m
+    input_series:
+      - series: 'am_autotask_company_selectors_companies{job="am-autotask", instance="am-autotask:8080", state="invalid"}'
+        values: '2x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: AmAutotaskInvalidCompanySelectors
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: am-autotask
+              instance: am-autotask:8080
+              state: invalid
+            exp_annotations:
+              summary: Some company selectors cannot be parsed
+              description: 2 companies have company selectors am-autotask:8080 cannot parse, so no alert groups are matched to them.
+              runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskinvalidcompanyselectors
+
+  - name: one invalid company selector
+    interval: 1m
+    input_series:
+      - series: 'am_autotask_company_selectors_companies{job="am-autotask", instance="am-autotask:8080", state="invalid"}'
+        values: '1x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: AmAutotaskInvalidCompanySelectors
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: am-autotask
+              instance: am-autotask:8080
+              state: invalid
+            exp_annotations:
+              summary: Some company selectors cannot be parsed
+              description: 1 company has company selectors am-autotask:8080 cannot parse, so no alert groups are matched to them.
+              runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskinvalidcompanyselectors

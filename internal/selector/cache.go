@@ -33,6 +33,7 @@ type Cache struct {
 
 	mu              sync.RWMutex
 	set             *Set
+	invalid         int
 	loadedAt        time.Time
 	lastMissRefresh time.Time
 
@@ -86,6 +87,7 @@ func (c *Cache) refresh(ctx context.Context) error {
 
 	c.mu.Lock()
 	c.set = set
+	c.invalid = len(errs)
 	c.loadedAt = c.opts.Now()
 	c.mu.Unlock()
 
@@ -126,6 +128,14 @@ func (c *Cache) current() *Set {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.set
+}
+
+// Counts returns the number of companies whose selectors were valid, and
+// invalid and so skipped, in the last successful load.
+func (c *Cache) Counts() (valid, invalid int) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.set.Len(), c.invalid
 }
 
 // Age returns the time since the last successful load.

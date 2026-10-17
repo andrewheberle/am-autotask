@@ -28,7 +28,7 @@ func testOptions() receiver.Options {
 
 func newReceiver(t *testing.T, at *fakeAutotask, opts receiver.Options) *receiver.Receiver {
 	t.Helper()
-	r, err := receiver.New(at, fakeMatcher{"foo": {100}, "both": {100, 200}}, receiver.NewMemoryLocker(), opts)
+	r, err := receiver.New(at, fakeMatcher{"foo": {100}, "both": {100, 200}, "rgi": {catchAll}}, receiver.NewMemoryLocker(), opts)
 	if err != nil {
 		t.Fatal(err)
 	}

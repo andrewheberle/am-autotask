@@ -26,6 +26,10 @@ All am-autotask metrics are prefixed `am_autotask_`. The standard Go runtime (`g
 | `am_autotask_alerts_moved_total` | counter | | Alerts moved off orphaned tickets onto their alert group's current ticket. |
 | `am_autotask_orphaned_tickets_completed_total` | counter | | Orphaned tickets completed because all of their alerts moved. |
 | `am_autotask_company_selectors_age_seconds` | gauge | | Time since company selectors were last loaded from Autotask. It drops back to zero on each successful reload, every `company.refresh` (default 15 minutes), and keeps growing while reloads fail. It is zero until the first load. |
+| `am_autotask_company_selectors_companies` | gauge | `state` | Companies with company selectors in the last successful load: `valid`, or `invalid` (their selectors do not parse, so they are skipped and no alert group can match them). |
+| `am_autotask_catchall_tickets_total` | counter | `reason` | Tickets raised against the catch-all company: `unmatched` (no company's selectors matched the alert group) or `ambiguous` (more than one company's did). |
+| `am_autotask_ready` | gauge | | `1` once startup has completed and notifications are being handled, otherwise `0`. |
+| `am_autotask_autotask_request_duration_seconds` | histogram | `operation` | Duration of Autotask operations made while handling notifications, with the same `operation` values as `am_autotask_autotask_errors_total`. An operation includes all of its pages and any read back, such as `create_ticket` reading the new ticket's number. |
 
 ### Useful queries
 
@@ -43,6 +47,12 @@ sum(increase(am_autotask_notes_created_total[1h]))
 
 # Autotask errors by operation and kind
 sum by (operation, kind) (rate(am_autotask_autotask_errors_total[5m]))
+
+# 95th percentile Autotask request duration by operation
+histogram_quantile(0.95, sum by (operation, le) (rate(am_autotask_autotask_request_duration_seconds_bucket[5m])))
+
+# tickets raised against the catch-all company per day, by reason
+sum by (reason) (increase(am_autotask_catchall_tickets_total[1d]))
 
 # deliveries Alertmanager could not make to am-autotask
 sum(rate(alertmanager_notifications_failed_total{integration="webhook", receiver="autotask"}[5m]))
@@ -79,6 +89,11 @@ The [alerting rules workflow](../.github/workflows/rules.yml) runs these checks 
 | [AmAutotaskCompanySelectorsStale](#amautotaskcompanyselectorsstale) | warning | Company selectors have not been reloaded for 45 minutes. |
 | [AmAutotaskRestarting](#amautotaskrestarting) | warning | am-autotask restarted more than three times in an hour. |
 | [AmAutotaskAlertsMoved](#amautotaskalertsmoved) | info | Alerts moved off orphaned tickets in the last hour. |
+| [AmAutotaskNotReady](#amautotasknotready) | warning | am-autotask has been running for 10 minutes without becoming ready. |
+| [AmAutotaskSlowAutotask](#amautotaskslowautotask) | warning | The 95th percentile Autotask request has taken over 5 seconds for 15 minutes. |
+| [AmAutotaskAmbiguousCompanyMatch](#amautotaskambiguouscompanymatch) | warning | An alert group matched more than one company in the last hour. |
+| [AmAutotaskUnmatchedAlertGroups](#amautotaskunmatchedalertgroups) | info | An alert group matched no company in the last hour. |
+| [AmAutotaskInvalidCompanySelectors](#amautotaskinvalidcompanyselectors) | warning | A company's selectors have failed to parse for 15 minutes. |
 
 ### Routing these alerts
 
@@ -172,11 +187,38 @@ Informational: alerts moved off orphaned tickets, usually because Alertmanager's
 
 Tickets whose alerts never fire again under a new group key are left open. After a routing change, check for open tickets whose `externalID` begins with `am:` that are no longer being updated, and complete them by hand. See the README's [limitations](../README.md#limitations).
 
-## Not covered by the metrics
+### AmAutotaskNotReady
 
-Some things am-autotask cannot currently report as metrics:
+am-autotask is running but has not finished starting, so it answers every notification with HTTP 500. Startup discovers the Autotask zone, validates the configuration against Autotask and loads company selectors; each step either succeeds or makes the process exit, so staying unready usually means one is hanging.
 
-- **How often the catch-all company is used.** Tickets raised against the catch-all company, because no company or more than one matched, are not counted separately. Ambiguous matches are logged with `alert group matches more than one company`.
-- **Readiness.** `/readyz` reports it, but there is no metric. Probe `/readyz` with the blackbox exporter if you need to alert on it.
-- **Autotask request latency.**
-- **Companies with invalid company selectors.** These are only logged.
+- Check am-autotask's logs for the last startup step reached.
+- Check Autotask, and the zone information URL, are reachable from am-autotask.
+
+### AmAutotaskSlowAutotask
+
+Autotask requests are slow, so notifications take longer to handle and Alertmanager may time out deliveries.
+
+- Check `histogram_quantile(0.95, sum by (operation, le) (rate(am_autotask_autotask_request_duration_seconds_bucket[5m])))` for which operations are slow. `open_alert_tickets` returns every open am-autotask ticket, so it grows with the number of open tickets.
+- Autotask adds delay as a database approaches its hourly request limit, and as concurrent requests to one endpoint pass three; check usage with the API's `ThresholdInformation` endpoint, and see [AmAutotaskRateLimited](#amautotaskratelimited).
+- Check Autotask's status for degraded performance.
+
+### AmAutotaskAmbiguousCompanyMatch
+
+An alert group matched the company selectors of more than one company, so its ticket was raised against the catch-all company. The ticket description names the companies, and am-autotask's logs have an `alert group matches more than one company` warning with the group labels.
+
+- Change the selectors of those companies so only one matches the group.
+- Move the ticket to the right company by hand; am-autotask chooses a group's company only when the ticket is created.
+
+### AmAutotaskUnmatchedAlertGroups
+
+Informational: an alert group matched no company's selectors, so its ticket was raised against the catch-all company. That can be intended, for alerts about your own infrastructure. Otherwise:
+
+- Add a selector to the company the group belongs to. The group labels are on the ticket.
+- Check the labels used in selectors are in the Alertmanager route's `group_by`; only group labels are matched.
+
+### AmAutotaskInvalidCompanySelectors
+
+Some companies' company selectors do not parse, so those companies are skipped and no alert group can match them. Their alerts go to the catch-all company instead.
+
+- Search am-autotask's logs for `skipping company with invalid company selectors`; each entry names the company and the parse error.
+- Correct the selectors in the company's UDF: one Alertmanager label selector per line, such as `{tenant_id="foo", site="bar"}`. The change is picked up at the next reload.
