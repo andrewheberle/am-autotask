@@ -28,6 +28,10 @@ type Config struct {
 	LogLevel     slog.Level
 	WebhookToken string
 
+	// TracingExporter is none, otlp or console; everything else about
+	// tracing comes from OTEL_* environment variables (ADR-0003).
+	TracingExporter string
+
 	Autotask Autotask
 
 	CompanySelectorsUDF string
@@ -58,6 +62,7 @@ func flags(name string) *pflag.FlagSet {
 	f.String("config", "", "path to YAML configuration file")
 	f.String("listen", ":8080", "address to listen on")
 	f.String("log.level", "info", "log level (debug, info, warn, error)")
+	f.String("tracing.exporter", "none", "trace exporter: none, otlp (OTLP over HTTP, configured by OTEL_* variables) or console")
 
 	f.String("webhook.token", "", "bearer token Alertmanager must send (required)")
 	f.String("webhook.tokenfile", "", "file containing webhook.token")
@@ -132,9 +137,10 @@ func Load(args []string) (Config, error) {
 	}
 
 	cfg := Config{
-		Listen:       k.String("listen"),
-		LogLevel:     level,
-		WebhookToken: values["webhook.token"],
+		Listen:          k.String("listen"),
+		LogLevel:        level,
+		WebhookToken:    values["webhook.token"],
+		TracingExporter: k.String("tracing.exporter"),
 		Autotask: Autotask{
 			Username:        values["autotask.username"],
 			Secret:          values["autotask.secret"],
@@ -180,6 +186,11 @@ func Load(args []string) (Config, error) {
 		if !r.set {
 			errs = append(errs, fmt.Errorf("%s is required", r.key))
 		}
+	}
+	switch cfg.TracingExporter {
+	case "none", "otlp", "console":
+	default:
+		errs = append(errs, fmt.Errorf("tracing.exporter %q must be none, otlp or console", cfg.TracingExporter))
 	}
 	if cfg.Refresh <= 0 {
 		errs = append(errs, errors.New("company.refresh must be positive"))

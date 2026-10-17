@@ -82,7 +82,7 @@ func (c *Cache) refresh(ctx context.Context) error {
 
 	set, errs := Build(companies)
 	for _, err := range errs {
-		c.opts.Logger.Warn("skipping company with invalid company selectors", "error", err)
+		c.opts.Logger.WarnContext(ctx, "skipping company with invalid company selectors", "error", err)
 	}
 
 	c.mu.Lock()
@@ -106,7 +106,7 @@ func (c *Cache) Match(ctx context.Context, groupLabels map[string]string) []int6
 		return nil
 	}
 	if err := c.Refresh(ctx); err != nil {
-		c.opts.Logger.Warn("company selector refresh after no match failed", "error", err)
+		c.opts.Logger.WarnContext(ctx, "company selector refresh after no match failed", "error", err)
 	}
 
 	return c.current().Match(groupLabels)
@@ -157,7 +157,7 @@ func (c *Cache) Run(ctx context.Context, interval time.Duration) {
 			return
 		case <-ticker.C:
 			if err := c.Refresh(ctx); err != nil {
-				c.opts.Logger.Warn("company selector refresh failed", "error", err)
+				c.opts.Logger.WarnContext(ctx, "company selector refresh failed", "error", err)
 			}
 		}
 	}

@@ -95,6 +95,7 @@ Each secret can be given directly or as a path to a file containing it, which su
 | --- | --- | --- |
 | `listen` | `:8080` | Address to listen on. |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error`. Logs are JSON on stderr. |
+| `tracing.exporter` | `none` | `none`, `otlp` or `console`. See [Tracing](#tracing). |
 | `autotask.zoneurl` | Autotask's zone information URL | The API zone for the user is discovered here at startup. |
 | `company.catchall` | | ID of the catch-all company. Required. |
 | `company.udf` | `Alertmanager Selectors` | Name of the Company UDF holding company selectors. |
@@ -137,6 +138,36 @@ ticket:
   queue: 8
   duein: 4h
 ```
+
+## Tracing
+
+am-autotask can trace each notification with [OpenTelemetry](https://opentelemetry.io/). Tracing is off until `tracing.exporter` is set (see [ADR-0003](docs/adr/0003-tracing-switch-in-configger-otel-settings-in-env.md)):
+
+- `otlp` exports spans with OTLP over HTTP (`http/protobuf`). If `OTEL_EXPORTER_OTLP_PROTOCOL` or `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` is set to anything else, such as `grpc`, am-autotask refuses to start.
+- `console` writes spans as JSON to stdout, for trying it out.
+
+Everything else uses the standard [OpenTelemetry environment variables](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/):
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | `http://localhost:4318` | Collector to export to. |
+| `OTEL_EXPORTER_OTLP_HEADERS` | | Headers to send, e.g. for authentication. |
+| `OTEL_EXPORTER_OTLP_CERTIFICATE`, `OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE`, `OTEL_EXPORTER_OTLP_CLIENT_KEY` | | TLS settings for the collector. |
+| `OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG` | `parentbased_always_on` | Sampling. By default each notification follows Alertmanager's sampling decision, and is sampled when Alertmanager sends none. |
+| `OTEL_SERVICE_NAME` | `am-autotask` | Service name. |
+| `OTEL_RESOURCE_ATTRIBUTES` | | Extra resource attributes, e.g. `deployment.environment.name=prod`. `service.version` is set to the am-autotask version. |
+
+`OTEL_TRACES_EXPORTER`, `OTEL_PROPAGATORS` and `OTEL_SDK_DISABLED` are not used: `tracing.exporter` chooses the exporter, and W3C trace context is always used.
+
+Alertmanager sends W3C trace context with each notification when its own [tracing](https://prometheus.io/docs/alerting/latest/configuration/#tracing_config) is enabled, so a notification's trace starts in Alertmanager and continues into am-autotask. Each trace has:
+
+- a `POST /webhook` span, then a `handle notification` span recording the outcome (`created`, `updated`, `unchanged` or `ignored`), the ticket, the company and any catch-all reason, the numbers of firing, resolved and moved alerts, and whether a failure was temporary or permanent;
+- spans for waiting for the alert group's lock, matching the company and handing alerts over from orphaned tickets;
+- an `autotask <operation>` span for each Autotask operation, with a span for each HTTP request it makes.
+
+Alert labels and annotations are never recorded, and Autotask URLs are recorded without their query strings, which carry the API user name and search filters. Trace context is not sent to Autotask. Company selector reloads are traced too: periodic reloads as their own traces, and a reload triggered by an alert group matching no company as part of that notification's trace.
+
+Log lines written while handling a notification carry its `trace_id` and `span_id`. Export failures are logged at `warn`, at most once a minute; tracing never delays or fails a notification.
 
 ## Running
 

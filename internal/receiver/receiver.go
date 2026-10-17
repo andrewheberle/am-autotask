@@ -12,6 +12,10 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // ErrPermanent marks an error that retrying the same notification cannot fix,
@@ -149,6 +153,10 @@ type Options struct {
 	// Observer, when set, is told about alerts moved off orphaned tickets.
 	Observer Observer
 
+	// TracerProvider traces handling of each notification. Default the
+	// global provider.
+	TracerProvider trace.TracerProvider
+
 	Now    func() time.Time
 	Logger *slog.Logger
 }
@@ -185,6 +193,7 @@ type Receiver struct {
 	matcher CompanyMatcher
 	locker  Locker
 	opts    Options
+	tracer  trace.Tracer
 }
 
 // New returns a Receiver.
@@ -210,8 +219,11 @@ func New(at Autotask, matcher CompanyMatcher, locker Locker, opts Options) (*Rec
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
+	if opts.TracerProvider == nil {
+		opts.TracerProvider = otel.GetTracerProvider()
+	}
 
-	return &Receiver{at: at, matcher: matcher, locker: locker, opts: opts}, nil
+	return &Receiver{at: at, matcher: matcher, locker: locker, opts: opts, tracer: opts.TracerProvider.Tracer(TracerScope)}, nil
 }
 
 // ExternalID returns the ticket external ID for an alert group.
@@ -230,10 +242,20 @@ func duplicateExternalID(externalID string) string {
 // Handle applies a notification to the alert group's current ticket,
 // creating one if needed. Errors not wrapping [ErrPermanent] are worth
 // retrying.
-func (r *Receiver) Handle(ctx context.Context, n Notification) error {
+func (r *Receiver) Handle(ctx context.Context, n Notification) (err error) {
 	externalID := ExternalID(n.GroupKey)
+	firing := alertsWithStatus(n.Alerts, statusFiring)
 
-	unlock, err := r.locker.Lock(ctx, externalID)
+	ctx, span := r.tracer.Start(ctx, "handle notification", trace.WithAttributes(
+		attribute.String("am_autotask.external_id", externalID),
+		attribute.String("am_autotask.receiver", n.Receiver),
+		attribute.String("am_autotask.notification.status", n.Status),
+		attribute.Int("am_autotask.alerts.firing", len(firing)),
+		attribute.Int("am_autotask.alerts.resolved", len(alertsWithStatus(n.Alerts, statusResolved))),
+	))
+	defer func() { EndSpan(span, err) }()
+
+	unlock, err := r.lock(ctx, externalID)
 	if err != nil {
 		return fmt.Errorf("locking alert group: %w", err)
 	}
@@ -244,17 +266,21 @@ func (r *Receiver) Handle(ctx context.Context, n Notification) error {
 		return fmt.Errorf("finding current ticket: %w", err)
 	}
 
-	firing := alertsWithStatus(n.Alerts, statusFiring)
 	orphans, err := r.findOrphans(ctx, externalID, firing)
 	if err != nil {
 		return err
 	}
 
 	var current Ticket
+	outcome := OutcomeCreated
 	if len(open) == 0 {
 		created, err := r.create(ctx, n, externalID, firing, orphans)
-		if err != nil || created == nil {
+		if err != nil {
 			return err
+		}
+		if created == nil {
+			span.SetAttributes(attribute.String("am_autotask.outcome", OutcomeIgnored))
+			return nil
 		}
 		current = *created
 	} else {
@@ -262,12 +288,30 @@ func (r *Receiver) Handle(ctx context.Context, n Notification) error {
 		if err := r.retireDuplicates(ctx, externalID, current, open[1:]); err != nil {
 			return err
 		}
-		if err := r.update(ctx, n, current); err != nil {
+		changed, err := r.update(ctx, n, current)
+		if err != nil {
 			return err
 		}
+		outcome = OutcomeUnchanged
+		if changed {
+			outcome = OutcomeUpdated
+		}
 	}
+	span.SetAttributes(
+		attribute.String("am_autotask.outcome", outcome),
+		attribute.Int64("am_autotask.ticket.id", current.ID),
+		attribute.String("am_autotask.ticket.number", current.Number),
+	)
 
 	return r.handOver(ctx, n, current, orphans)
+}
+
+// lock takes the alert group's lock, tracing the wait.
+func (r *Receiver) lock(ctx context.Context, externalID string) (func(), error) {
+	ctx, span := r.tracer.Start(ctx, "lock alert group")
+	unlock, err := r.locker.Lock(ctx, externalID)
+	EndSpan(span, err)
+	return unlock, err
 }
 
 // retireDuplicates warns on every open ticket for the alert group other than
@@ -275,7 +319,7 @@ func (r *Receiver) Handle(ctx context.Context, n Notification) error {
 // current and are only warned once. Merging is left to a person.
 func (r *Receiver) retireDuplicates(ctx context.Context, externalID string, current Ticket, duplicates []Ticket) error {
 	for _, d := range duplicates {
-		r.opts.Logger.Warn("alert group has more than one open ticket", "current", current.Number, "duplicate", d.Number)
+		r.opts.Logger.WarnContext(ctx, "alert group has more than one open ticket", "current", current.Number, "duplicate", d.Number)
 
 		if err := r.at.CreateNote(ctx, NewNote{
 			TicketID:    d.ID,
@@ -299,11 +343,11 @@ func (r *Receiver) retireDuplicates(ctx context.Context, externalID string, curr
 // update records the alerts that fired or resolved since the ticket last
 // changed. The note is written before the recorded alerts so that a failure
 // in between repeats the note on retry rather than losing it.
-func (r *Receiver) update(ctx context.Context, n Notification, t Ticket) error {
+func (r *Receiver) update(ctx context.Context, n Notification, t Ticket) (changed bool, err error) {
 	groupResolved := n.Status == statusResolved
 	fired, resolved, recorded, ok := diff(t.RecordedAlerts, n.Alerts, groupResolved)
 	if !ok {
-		return nil
+		return false, nil
 	}
 
 	if groupResolved {
@@ -311,10 +355,10 @@ func (r *Receiver) update(ctx context.Context, n Notification, t Ticket) error {
 		// resolved along with the rest of the group
 		clear(recorded)
 	}
-	changed := len(fired) > 0 || len(resolved) > 0 || (groupResolved && t.RecordedAlerts != "")
+	noted := len(fired) > 0 || len(resolved) > 0 || (groupResolved && t.RecordedAlerts != "")
 
 	var update TicketUpdate
-	if changed {
+	if noted {
 		value, overflow := encodeRecorded(keys(recorded))
 
 		title := noteTitle(len(fired), len(resolved))
@@ -328,7 +372,7 @@ func (r *Receiver) update(ctx context.Context, n Notification, t Ticket) error {
 			NoteType:    r.opts.NoteType,
 			Publish:     r.opts.NotePublish,
 		}); err != nil {
-			return fmt.Errorf("adding note to ticket %s: %w", t.Number, err)
+			return false, fmt.Errorf("adding note to ticket %s: %w", t.Number, err)
 		}
 
 		update.RecordedAlerts = &value
@@ -341,20 +385,20 @@ func (r *Receiver) update(ctx context.Context, n Notification, t Ticket) error {
 	}
 
 	if update.RecordedAlerts == nil && update.Status == nil {
-		return nil
+		return false, nil
 	}
 	if err := r.at.UpdateTicket(ctx, t.ID, update); err != nil {
-		return fmt.Errorf("updating ticket %s: %w", t.Number, err)
+		return false, fmt.Errorf("updating ticket %s: %w", t.Number, err)
 	}
 
-	return nil
+	return true, nil
 }
 
 // create raises a ticket for an alert group with no current ticket,
 // returning nil if nothing is firing.
 func (r *Receiver) create(ctx context.Context, n Notification, externalID string, firing []Alert, orphans []orphan) (*Ticket, error) {
 	if len(firing) == 0 {
-		r.opts.Logger.Debug("ignoring notification with nothing firing and no current ticket", "groupKey", n.GroupKey)
+		r.opts.Logger.DebugContext(ctx, "ignoring notification with nothing firing and no current ticket", "groupKey", n.GroupKey)
 		return nil, nil
 	}
 
@@ -364,6 +408,11 @@ func (r *Receiver) create(ctx context.Context, n Notification, externalID string
 	}
 
 	companyID, catchAll, ambiguous := r.company(ctx, n.GroupLabels)
+	span := trace.SpanFromContext(ctx)
+	span.SetAttributes(attribute.Int64("am_autotask.company.id", companyID))
+	if catchAll != "" {
+		span.SetAttributes(attribute.String("am_autotask.catchall", catchAll))
+	}
 	recorded, overflow := encodeRecorded(fingerprints(firing))
 
 	t := NewTicket{
@@ -402,14 +451,18 @@ func (r *Receiver) create(ctx context.Context, n Notification, externalID string
 // company it also returns why, and the matching company IDs when more than
 // one matched.
 func (r *Receiver) company(ctx context.Context, groupLabels map[string]string) (id int64, catchAll string, ambiguous []int64) {
+	ctx, span := r.tracer.Start(ctx, "match company")
+	defer span.End()
+
 	ids := r.matcher.Match(ctx, groupLabels)
+	span.SetAttributes(attribute.Int("am_autotask.companies.matched", len(ids)))
 	switch len(ids) {
 	case 1:
 		return ids[0], "", nil
 	case 0:
 		return r.opts.CatchAllCompanyID, CatchAllUnmatched, nil
 	default:
-		r.opts.Logger.Warn("alert group matches more than one company; using catch-all company",
+		r.opts.Logger.WarnContext(ctx, "alert group matches more than one company; using catch-all company",
 			"companies", ids, "groupLabels", groupLabels)
 		return r.opts.CatchAllCompanyID, CatchAllAmbiguous, ids
 	}

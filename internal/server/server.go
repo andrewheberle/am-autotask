@@ -13,6 +13,11 @@ import (
 	"strings"
 	"sync"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/andrewheberle/am-autotask/internal/receiver"
 )
 
@@ -48,6 +53,11 @@ type Options struct {
 	Observe func(result string)
 	// Logger defaults to [slog.Default].
 	Logger *slog.Logger
+	// TracerProvider traces webhook requests. Default the global provider.
+	TracerProvider trace.TracerProvider
+	// Propagators read the trace context Alertmanager sends. Default the
+	// global propagators.
+	Propagators propagation.TextMapPropagator
 }
 
 type server struct {
@@ -68,10 +78,21 @@ func New(h Handler, opts Options) http.Handler {
 	if opts.Observe == nil {
 		opts.Observe = func(string) {}
 	}
+	if opts.TracerProvider == nil {
+		opts.TracerProvider = otel.GetTracerProvider()
+	}
+	if opts.Propagators == nil {
+		opts.Propagators = otel.GetTextMapPropagator()
+	}
 	s := &server{h: h, opts: opts}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /webhook", s.webhook)
+	// only notifications are traced, continuing Alertmanager's trace
+	mux.Handle("POST /webhook", otelhttp.NewHandler(http.HandlerFunc(s.webhook), "",
+		otelhttp.WithTracerProvider(opts.TracerProvider),
+		otelhttp.WithPropagators(opts.Propagators),
+		otelhttp.WithSpanNameFormatter(func(string, *http.Request) string { return "POST /webhook" }),
+	))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -116,7 +137,7 @@ func (s *server) webhook(w http.ResponseWriter, r *http.Request) {
 	}
 	if n.Version != supportedVersion {
 		s.versionOnce.Do(func() {
-			s.opts.Logger.Error("rejecting notifications with unsupported webhook version",
+			s.opts.Logger.ErrorContext(r.Context(), "rejecting notifications with unsupported webhook version",
 				"version", n.Version, "supported", supportedVersion)
 		})
 		s.opts.Observe(ResultInvalid)
@@ -131,12 +152,12 @@ func (s *server) webhook(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	case errors.Is(err, receiver.ErrPermanent):
 		// retrying cannot help, so acknowledge it and leave a record
-		s.opts.Logger.Error("notification failed permanently; not retrying",
+		s.opts.Logger.ErrorContext(r.Context(), "notification failed permanently; not retrying",
 			"error", err, "groupKey", n.GroupKey, "payload", string(body))
 		s.opts.Observe(ResultPermanent)
 		w.WriteHeader(http.StatusOK)
 	default:
-		s.opts.Logger.Warn("notification failed; Alertmanager will retry", "error", err, "groupKey", n.GroupKey)
+		s.opts.Logger.WarnContext(r.Context(), "notification failed; Alertmanager will retry", "error", err, "groupKey", n.GroupKey)
 		s.opts.Observe(ResultTemporary)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}

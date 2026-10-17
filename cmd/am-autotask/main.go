@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/spf13/pflag"
+	"go.opentelemetry.io/otel"
 
 	"github.com/andrewheberle/am-autotask/internal/autotask"
 	"github.com/andrewheberle/am-autotask/internal/config"
@@ -22,6 +23,7 @@ import (
 	"github.com/andrewheberle/am-autotask/internal/receiver"
 	"github.com/andrewheberle/am-autotask/internal/selector"
 	"github.com/andrewheberle/am-autotask/internal/server"
+	"github.com/andrewheberle/am-autotask/internal/tracing"
 )
 
 // Version is set at build time.
@@ -64,11 +66,28 @@ func run() error {
 		return err
 	}
 
-	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
+	logger := slog.New(tracing.LogHandler(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.LogLevel})))
 	slog.SetDefault(logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	tp, err := tracing.Setup(ctx, tracing.Options{Exporter: cfg.TracingExporter, ServiceVersion: Version})
+	if err != nil {
+		return fmt.Errorf("setting up tracing: %w", err)
+	}
+	otel.SetTracerProvider(tp.TracerProvider)
+	otel.SetTextMapPropagator(tp.Propagators)
+	otel.SetErrorHandler(tracing.NewErrorHandler(logger, time.Minute, nil))
+	flushed := false
+	defer func() {
+		// flush spans from a failed startup; a normal shutdown flushes below
+		if !flushed {
+			flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = tp.Shutdown(flushCtx)
+		}
+	}()
 
 	g := &gate{}
 
@@ -98,6 +117,9 @@ func run() error {
 			Metrics: m.Handler(),
 			Observe: m.ObserveNotification,
 			Logger:  logger,
+
+			TracerProvider: tp.TracerProvider,
+			Propagators:    tp.Propagators,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
@@ -114,6 +136,10 @@ func run() error {
 		ZoneInformationURL:  cfg.Autotask.ZoneURL,
 		CompanySelectorsUDF: cfg.CompanySelectorsUDF,
 		RecordedAlertsUDF:   cfg.RecordedAlertsUDF,
+		HTTPClient: &http.Client{
+			Timeout:   60 * time.Second,
+			Transport: tracing.Transport(http.DefaultTransport, tp.TracerProvider),
+		},
 	})
 	if err != nil {
 		return err
@@ -123,7 +149,7 @@ func run() error {
 		return fmt.Errorf("configuration does not match Autotask:\n%w", err)
 	}
 
-	cache := selector.NewCache(client.Companies, selector.CacheOptions{
+	cache := selector.NewCache(tracing.Source(client.Companies, tp.TracerProvider), selector.CacheOptions{
 		MissRefreshInterval: cfg.MissRefresh,
 		Logger:              logger,
 	})
@@ -136,7 +162,9 @@ func run() error {
 	opts := cfg.Receiver
 	opts.Logger = logger
 	opts.Observer = m
-	r, err := receiver.New(m.Instrument(client), cache, receiver.NewMemoryLocker(), opts)
+	opts.TracerProvider = tp.TracerProvider
+	at := tracing.Autotask(m.Instrument(client), tp.TracerProvider)
+	r, err := receiver.New(at, cache, receiver.NewMemoryLocker(), opts)
 	if err != nil {
 		return err
 	}
@@ -152,5 +180,7 @@ func run() error {
 	logger.Info("shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return srv.Shutdown(shutdownCtx)
+	err = srv.Shutdown(shutdownCtx)
+	flushed = true
+	return errors.Join(err, tp.Shutdown(shutdownCtx))
 }

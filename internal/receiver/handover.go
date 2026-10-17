@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // orphan is an open ticket of another alert group that has recorded alerts
@@ -59,10 +62,26 @@ func (r *Receiver) findOrphans(ctx context.Context, externalID string, firing []
 	return orphans, nil
 }
 
-// handOver moves alerts off each orphaned ticket onto current.
-func (r *Receiver) handOver(ctx context.Context, n Notification, current Ticket, orphans []orphan) error {
+// handOver moves alerts off each orphaned ticket onto current, recording the
+// number moved on the notification's span.
+func (r *Receiver) handOver(ctx context.Context, n Notification, current Ticket, orphans []orphan) (err error) {
+	if len(orphans) == 0 {
+		return nil
+	}
+	parent := trace.SpanFromContext(ctx)
+
+	ctx, span := r.tracer.Start(ctx, "hand over", trace.WithAttributes(attribute.Int("am_autotask.orphans", len(orphans))))
+	moved := 0
+	defer func() {
+		parent.SetAttributes(attribute.Int("am_autotask.alerts.moved", moved))
+		span.SetAttributes(attribute.Int("am_autotask.alerts.moved", moved))
+		EndSpan(span, err)
+	}()
+
 	for _, o := range orphans {
-		if err := r.moveFrom(ctx, n, current, o); err != nil {
+		m, err := r.moveFrom(ctx, n, current, o)
+		moved += m
+		if err != nil {
 			return err
 		}
 	}
@@ -73,23 +92,23 @@ func (r *Receiver) handOver(ctx context.Context, n Notification, current Ticket,
 // them there, completing the ticket once nothing is left. It holds the
 // orphaned ticket's group lock, re-reading the ticket under it, so moves from
 // a split group cannot overwrite each other.
-func (r *Receiver) moveFrom(ctx context.Context, n Notification, current Ticket, o orphan) error {
+func (r *Receiver) moveFrom(ctx context.Context, n Notification, current Ticket, o orphan) (int, error) {
 	lockCtx, cancel := context.WithTimeout(ctx, r.opts.HandoverLockTimeout)
 	unlock, err := r.locker.Lock(lockCtx, o.ticket.ExternalID)
 	cancel()
 	if err != nil {
-		return fmt.Errorf("locking orphaned ticket %s: %w", o.ticket.Number, err)
+		return 0, fmt.Errorf("locking orphaned ticket %s: %w", o.ticket.Number, err)
 	}
 	defer unlock()
 
 	open, err := r.at.OpenTickets(ctx, o.ticket.ExternalID)
 	if err != nil {
-		return fmt.Errorf("re-reading orphaned ticket %s: %w", o.ticket.Number, err)
+		return 0, fmt.Errorf("re-reading orphaned ticket %s: %w", o.ticket.Number, err)
 	}
 	i := slices.IndexFunc(open, func(t Ticket) bool { return t.ID == o.ticket.ID })
 	if i < 0 {
 		// completed meanwhile
-		return nil
+		return 0, nil
 	}
 	t := open[i]
 
@@ -102,7 +121,7 @@ func (r *Receiver) moveFrom(ctx context.Context, n Notification, current Ticket,
 		}
 	}
 	if len(moved) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	value, _ := encodeRecorded(keys(recorded))
@@ -115,7 +134,7 @@ func (r *Receiver) moveFrom(ctx context.Context, n Notification, current Ticket,
 		NoteType:    r.opts.NoteType,
 		Publish:     r.opts.NotePublish,
 	}); err != nil {
-		return fmt.Errorf("adding note to orphaned ticket %s: %w", t.Number, err)
+		return 0, fmt.Errorf("adding note to orphaned ticket %s: %w", t.Number, err)
 	}
 
 	update := TicketUpdate{RecordedAlerts: &value}
@@ -123,15 +142,15 @@ func (r *Receiver) moveFrom(ctx context.Context, n Notification, current Ticket,
 		update.Status = &r.opts.ResolvedStatus
 	}
 	if err := r.at.UpdateTicket(ctx, t.ID, update); err != nil {
-		return fmt.Errorf("updating orphaned ticket %s: %w", t.Number, err)
+		return 0, fmt.Errorf("updating orphaned ticket %s: %w", t.Number, err)
 	}
 
-	r.opts.Logger.Info("moved alerts off orphaned ticket",
+	r.opts.Logger.InfoContext(ctx, "moved alerts off orphaned ticket",
 		"orphan", t.Number, "to", current.Number, "alerts", len(moved), "emptied", emptied)
 	r.opts.Observer.AlertsMoved(len(moved))
 	if emptied && r.opts.ResolvedStatus != 0 {
 		r.opts.Observer.OrphanCompleted()
 	}
 
-	return nil
+	return len(moved), nil
 }
