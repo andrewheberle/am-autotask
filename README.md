@@ -135,7 +135,7 @@ ticket:
 
 ```sh
 docker run -v ./config.yaml:/etc/am-autotask/config.yaml \
-  ghcr.io/andrewheberle/am-autotask:v0.0.1 --config /etc/am-autotask/config.yaml # x-release-please-version
+  ghcr.io/andrewheberle/am-autotask:v0.1.0 --config /etc/am-autotask/config.yaml # x-release-please-version
 ```
 
 ### Endpoints
