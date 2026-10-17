@@ -64,6 +64,8 @@ The rules come with unit tests. Run them with [promtool](https://prometheus.io/d
 promtool test rules examples/prometheus/am-autotask.rules.test.yml
 ```
 
+The [alerting rules workflow](../.github/workflows/rules.yml) runs these checks on pull requests that change the rules.
+
 | Alert | Severity | Fires when |
 | --- | --- | --- |
 | [AmAutotaskDown](#amautotaskdown) | critical | am-autotask cannot be scraped for 5 minutes. |
