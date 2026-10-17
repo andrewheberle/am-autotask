@@ -31,6 +31,7 @@ Run these before considering any change complete:
 - Metrics are handled via `github.com/prometheus/client_golang`
 - Do not remove or rename existing metrics unless explicitly directed to or if granted permission to fix a legitimate error in the naming of a metrics
 - Metrics should be implemented as per the Prometheus intrumentation best practices: https://prometheus.io/docs/practices/instrumentation/
+- Adding or changing a metric includes reviewing the example alerting rules in `examples/prometheus/am-autotask.rules.yml`. When the metric shows a problem an operator should act on, add an alert with a test in `am-autotask.rules.test.yml` and a runbook section in `docs/monitoring.md`, then run `promtool test rules examples/prometheus/am-autotask.rules.test.yml`. Either way, add the metric to the metrics table in `docs/monitoring.md`.
 
 ## Documentation
 - Command line flag or behaviour changes must be reflected in `README.md`

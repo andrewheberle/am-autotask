@@ -74,11 +74,20 @@ func run() error {
 
 	// read by metrics scrapes, which may happen before the cache exists
 	var cachePtr atomic.Pointer[selector.Cache]
-	m := metrics.New(func() time.Duration {
-		if c := cachePtr.Load(); c != nil {
-			return c.Age()
-		}
-		return 0
+	m := metrics.New(metrics.Options{
+		SelectorsAge: func() time.Duration {
+			if c := cachePtr.Load(); c != nil {
+				return c.Age()
+			}
+			return 0
+		},
+		SelectorCounts: func() (int, int) {
+			if c := cachePtr.Load(); c != nil {
+				return c.Counts()
+			}
+			return 0, 0
+		},
+		Ready: g.ready,
 	})
 
 	srv := &http.Server{

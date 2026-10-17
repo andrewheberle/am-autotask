@@ -153,8 +153,18 @@ type Options struct {
 	Logger *slog.Logger
 }
 
-// Observer is told about handovers from orphaned tickets, for metrics.
+// Reasons a ticket is raised against the catch-all company, reported to
+// [Observer.CatchAll].
+const (
+	CatchAllUnmatched = "unmatched"
+	CatchAllAmbiguous = "ambiguous"
+)
+
+// Observer is told about events worth counting, for metrics.
 type Observer interface {
+	// CatchAll is called when a ticket is raised against the catch-all
+	// company, with the reason: [CatchAllUnmatched] or [CatchAllAmbiguous].
+	CatchAll(reason string)
 	// AlertsMoved is called with the number of alerts moved off an orphaned
 	// ticket.
 	AlertsMoved(n int)
@@ -165,6 +175,7 @@ type Observer interface {
 
 type noopObserver struct{}
 
+func (noopObserver) CatchAll(string)  {}
 func (noopObserver) AlertsMoved(int)  {}
 func (noopObserver) OrphanCompleted() {}
 
@@ -352,7 +363,7 @@ func (r *Receiver) create(ctx context.Context, n Notification, externalID string
 		return nil, fmt.Errorf("finding previous ticket: %w", err)
 	}
 
-	companyID, ambiguous := r.company(ctx, n.GroupLabels)
+	companyID, catchAll, ambiguous := r.company(ctx, n.GroupLabels)
 	recorded, overflow := encodeRecorded(fingerprints(firing))
 
 	t := NewTicket{
@@ -380,22 +391,27 @@ func (r *Receiver) create(ctx context.Context, n Notification, externalID string
 		return nil, fmt.Errorf("creating ticket: %w", err)
 	}
 
+	if catchAll != "" {
+		r.opts.Observer.CatchAll(catchAll)
+	}
+
 	return &created, nil
 }
 
-// company returns the company for an alert group, and the matching company
-// IDs when more than one matched.
-func (r *Receiver) company(ctx context.Context, groupLabels map[string]string) (int64, []int64) {
+// company returns the company for an alert group. When that is the catch-all
+// company it also returns why, and the matching company IDs when more than
+// one matched.
+func (r *Receiver) company(ctx context.Context, groupLabels map[string]string) (id int64, catchAll string, ambiguous []int64) {
 	ids := r.matcher.Match(ctx, groupLabels)
 	switch len(ids) {
 	case 1:
-		return ids[0], nil
+		return ids[0], "", nil
 	case 0:
-		return r.opts.CatchAllCompanyID, nil
+		return r.opts.CatchAllCompanyID, CatchAllUnmatched, nil
 	default:
 		r.opts.Logger.Warn("alert group matches more than one company; using catch-all company",
 			"companies", ids, "groupLabels", groupLabels)
-		return r.opts.CatchAllCompanyID, ids
+		return r.opts.CatchAllCompanyID, CatchAllAmbiguous, ids
 	}
 }
 

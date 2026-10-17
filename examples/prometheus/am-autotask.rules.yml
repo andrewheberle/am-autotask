@@ -118,3 +118,52 @@ groups:
           summary: Alerts moved off orphaned tickets
           description: Alerts on {{ $labels.instance }} moved to new tickets in the last hour, usually after a change to Alertmanager's routes or group_by. Check for orphaned tickets left open.
           runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskalertsmoved
+
+      - alert: AmAutotaskNotReady
+        expr: am_autotask_ready{job="am-autotask"} == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: am-autotask has not finished starting
+          description: '{{ $labels.instance }} has been running for 10 minutes without becoming ready, so it is answering notifications with errors.'
+          runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotasknotready
+
+      - alert: AmAutotaskSlowAutotask
+        expr: |
+          histogram_quantile(0.95, sum by (instance, le) (rate(am_autotask_autotask_request_duration_seconds_bucket{job="am-autotask"}[10m]))) > 5
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: Autotask requests are slow
+          description: The slowest 5% of Autotask requests from {{ $labels.instance }} are taking longer than {{ $value | humanizeDuration }}. Notifications are being handled slowly.
+          runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskslowautotask
+
+      - alert: AmAutotaskAmbiguousCompanyMatch
+        expr: sum by (instance) (increase(am_autotask_catchall_tickets_total{job="am-autotask", reason="ambiguous"}[1h])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: Alert groups match more than one company
+          description: Tickets on {{ $labels.instance }} in the last hour were raised against the catch-all company because their alert group matched the company selectors of more than one company.
+          runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskambiguouscompanymatch
+
+      - alert: AmAutotaskUnmatchedAlertGroups
+        expr: sum by (instance) (increase(am_autotask_catchall_tickets_total{job="am-autotask", reason="unmatched"}[1h])) > 0
+        labels:
+          severity: info
+        annotations:
+          summary: Alert groups match no company
+          description: Tickets on {{ $labels.instance }} in the last hour were raised against the catch-all company because their alert group matched no company's selectors.
+          runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskunmatchedalertgroups
+
+      - alert: AmAutotaskInvalidCompanySelectors
+        expr: am_autotask_company_selectors_companies{job="am-autotask", state="invalid"} > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: Some company selectors cannot be parsed
+          description: '{{ if eq $value 1.0 }}1 company has{{ else }}{{ $value }} companies have{{ end }} company selectors {{ $labels.instance }} cannot parse, so no alert groups are matched to them.'
+          runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskinvalidcompanyselectors

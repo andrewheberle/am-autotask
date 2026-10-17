@@ -150,3 +150,30 @@ func TestCacheAgeTracksLastSuccessfulLoad(t *testing.T) {
 		t.Errorf("Age = %v, want 10m", got)
 	}
 }
+
+func TestCacheCountsValidAndInvalidCompaniesOfLastLoad(t *testing.T) {
+	src := &fakeSource{companies: []selector.Company{fooCo, barCo, {ID: 3, Selectors: `{tenant_id="baz"`}}}
+	cache := newCache(t, src, &fakeClock{t: time.Unix(0, 0)})
+	if err := cache.Load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	if valid, invalid := cache.Counts(); valid != 2 || invalid != 1 {
+		t.Errorf("Counts = %d valid, %d invalid; want 2, 1", valid, invalid)
+	}
+
+	// a failed refresh keeps the counts of the set still in use
+	src.set(nil, errors.New("autotask down"))
+	_ = cache.Refresh(context.Background())
+	if valid, invalid := cache.Counts(); valid != 2 || invalid != 1 {
+		t.Errorf("Counts after failed refresh = %d valid, %d invalid; want 2, 1", valid, invalid)
+	}
+
+	src.set([]selector.Company{fooCo}, nil)
+	if err := cache.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if valid, invalid := cache.Counts(); valid != 1 || invalid != 0 {
+		t.Errorf("Counts after refresh = %d valid, %d invalid; want 1, 0", valid, invalid)
+	}
+}
