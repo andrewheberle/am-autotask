@@ -63,6 +63,14 @@ receivers:
 
 Only webhook payload version 4 is accepted; anything else is rejected with HTTP 400 and logged once.
 
+> [!WARNING]
+> A ticket belongs to an Alertmanager group key, which is built from the route's matchers (and its parents') plus the group labels. It does **not** include the receiver name or the route's position. The following configurations therefore cause different alert groups to share tickets:
+>
+> - **Overlapping routes.** Two routes with identical matchers that both reach am-autotask, for example sibling routes using `continue: true` or two receivers pointing at the same am-autotask, send the same group twice and share one ticket. Route each alert to am-autotask once.
+> - **Several instances on one Autotask database.** Instances of am-autotask with different settings writing to the same Autotask database treat each other's tickets as their own. Use one instance per Autotask database.
+>
+> Sibling routes with identical matchers but different `active_time_intervals` (for example business hours and after hours), where only one is active at a time, are fine: one ongoing problem stays on one ticket across the handover.
+
 ## Configuration
 
 Settings come from command line flags, a YAML file named by `--config`, and environment variables prefixed `AM_AUTOTASK_`, loaded with [configger](https://github.com/andrewheberle/configger). Later sources override earlier ones in this order: flag defaults, configuration file, environment variables, flags given on the command line.
@@ -152,5 +160,6 @@ docker run -v ./config.yaml:/etc/am-autotask/config.yaml \
 - The receiver runs as a single instance. Handling of each alert group is serialised in-process, behind an interface so a shared lock can be added to support replicas.
 - If more than one open ticket is ever found for a group, the oldest is used and each other one gets a note naming it and has its `externalID` changed to `am:dup:…` so it is warned only once. Merging is left to a person.
 - The Ticket UDF holds the fingerprints of about 450 alerts. Beyond that a group stops recording individual alerts: a note says so, further changes are not noted, and the group resolving still completes the ticket.
+- Changing route matchers, `group_by` or how routes nest changes the group keys of the affected groups. Their open tickets are no longer found, so they receive no further notes and are never completed; complete them by hand after such a change. New tickets are raised as the groups fire under their new keys.
 - An alert only counts as resolved when Alertmanager sends it with `status: resolved`; an alert missing from a notification stays recorded until then, or until the whole group resolves.
 - Autotask limits API use to 10,000 requests an hour per database, shared with every other integration, and three concurrent requests per endpoint. The receiver makes at most three concurrent requests.
