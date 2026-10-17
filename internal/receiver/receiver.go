@@ -53,6 +53,7 @@ type Ticket struct {
 	ID             int64
 	Number         string
 	Status         int
+	ExternalID     string
 	RecordedAlerts string
 }
 
@@ -98,6 +99,10 @@ type Autotask interface {
 	// PreviousTicket returns the most recent complete ticket with this
 	// external ID, or nil if there is none.
 	PreviousTicket(ctx context.Context, externalID string) (*Ticket, error)
+	// OpenAlertTickets returns every ticket that is not complete and whose
+	// external ID begins with "am:", across all alert groups.
+	OpenAlertTickets(ctx context.Context) ([]Ticket, error)
+	// CreateTicket creates a ticket, returning it with its number.
 	CreateTicket(ctx context.Context, t NewTicket) (Ticket, error)
 	CreateNote(ctx context.Context, n NewNote) error
 	UpdateTicket(ctx context.Context, id int64, u TicketUpdate) error
@@ -137,9 +142,31 @@ type Options struct {
 	NoteType    int
 	NotePublish int
 
+	// HandoverLockTimeout bounds the wait for another alert group's lock
+	// when moving alerts off its orphaned ticket. Default 10 seconds.
+	HandoverLockTimeout time.Duration
+
+	// Observer, when set, is told about alerts moved off orphaned tickets.
+	Observer Observer
+
 	Now    func() time.Time
 	Logger *slog.Logger
 }
+
+// Observer is told about handovers from orphaned tickets, for metrics.
+type Observer interface {
+	// AlertsMoved is called with the number of alerts moved off an orphaned
+	// ticket.
+	AlertsMoved(n int)
+	// OrphanCompleted is called when an orphaned ticket is completed because
+	// all of its alerts have moved.
+	OrphanCompleted()
+}
+
+type noopObserver struct{}
+
+func (noopObserver) AlertsMoved(int)  {}
+func (noopObserver) OrphanCompleted() {}
 
 // Receiver applies notifications to Autotask.
 type Receiver struct {
@@ -159,6 +186,12 @@ func New(at Autotask, matcher CompanyMatcher, locker Locker, opts Options) (*Rec
 	}
 	if opts.SeverityLabel == "" {
 		opts.SeverityLabel = "severity"
+	}
+	if opts.HandoverLockTimeout == 0 {
+		opts.HandoverLockTimeout = 10 * time.Second
+	}
+	if opts.Observer == nil {
+		opts.Observer = noopObserver{}
 	}
 	if opts.Now == nil {
 		opts.Now = time.Now
@@ -200,15 +233,30 @@ func (r *Receiver) Handle(ctx context.Context, n Notification) error {
 		return fmt.Errorf("finding current ticket: %w", err)
 	}
 
-	if len(open) == 0 {
-		return r.create(ctx, n, externalID)
-	}
-
-	if err := r.retireDuplicates(ctx, externalID, open[0], open[1:]); err != nil {
+	firing := alertsWithStatus(n.Alerts, statusFiring)
+	orphans, err := r.findOrphans(ctx, externalID, firing)
+	if err != nil {
 		return err
 	}
 
-	return r.update(ctx, n, open[0])
+	var current Ticket
+	if len(open) == 0 {
+		created, err := r.create(ctx, n, externalID, firing, orphans)
+		if err != nil || created == nil {
+			return err
+		}
+		current = *created
+	} else {
+		current = open[0]
+		if err := r.retireDuplicates(ctx, externalID, current, open[1:]); err != nil {
+			return err
+		}
+		if err := r.update(ctx, n, current); err != nil {
+			return err
+		}
+	}
+
+	return r.handOver(ctx, n, current, orphans)
 }
 
 // retireDuplicates warns on every open ticket for the alert group other than
@@ -291,16 +339,17 @@ func (r *Receiver) update(ctx context.Context, n Notification, t Ticket) error {
 	return nil
 }
 
-func (r *Receiver) create(ctx context.Context, n Notification, externalID string) error {
-	firing := alertsWithStatus(n.Alerts, statusFiring)
+// create raises a ticket for an alert group with no current ticket,
+// returning nil if nothing is firing.
+func (r *Receiver) create(ctx context.Context, n Notification, externalID string, firing []Alert, orphans []orphan) (*Ticket, error) {
 	if len(firing) == 0 {
 		r.opts.Logger.Debug("ignoring notification with nothing firing and no current ticket", "groupKey", n.GroupKey)
-		return nil
+		return nil, nil
 	}
 
 	previous, err := r.at.PreviousTicket(ctx, externalID)
 	if err != nil {
-		return fmt.Errorf("finding previous ticket: %w", err)
+		return nil, fmt.Errorf("finding previous ticket: %w", err)
 	}
 
 	companyID, ambiguous := r.company(ctx, n.GroupLabels)
@@ -309,7 +358,7 @@ func (r *Receiver) create(ctx context.Context, n Notification, externalID string
 	t := NewTicket{
 		CompanyID:      companyID,
 		Title:          ticketTitle(n),
-		Description:    ticketDescription(n, firing, ambiguous, previous, overflow),
+		Description:    ticketDescription(n, firing, ambiguous, previous, orphanTickets(orphans), overflow),
 		ExternalID:     externalID,
 		Priority:       r.priority(n.CommonLabels),
 		Status:         r.opts.Status,
@@ -326,11 +375,12 @@ func (r *Receiver) create(ctx context.Context, n Notification, externalID string
 		t.DueDateTime = &due
 	}
 
-	if _, err := r.at.CreateTicket(ctx, t); err != nil {
-		return fmt.Errorf("creating ticket: %w", err)
+	created, err := r.at.CreateTicket(ctx, t)
+	if err != nil {
+		return nil, fmt.Errorf("creating ticket: %w", err)
 	}
 
-	return nil
+	return &created, nil
 }
 
 // company returns the company for an alert group, and the matching company

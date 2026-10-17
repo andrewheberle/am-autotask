@@ -34,6 +34,10 @@ _Avoid_: Default company, fallback org
 The Autotask ticket representing exactly one alert group. A group has at most one open ticket at a time, its **Current Ticket**; once closed, a ticket is never reopened and the group's next firing gets a new one.
 _Avoid_: Case, incident
 
+**Orphaned Ticket**:
+An open ticket whose alert group no longer receives notifications because its group key changed, recognised when its recorded alerts fire in another alert group.
+_Avoid_: Stale ticket, abandoned ticket
+
 **Recorded Alerts**:
 The firing alerts a ticket has already noted, against which each notification is compared to find what fired and what resolved.
 _Avoid_: Known alerts, alert state, cache

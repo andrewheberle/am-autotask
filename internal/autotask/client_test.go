@@ -372,3 +372,53 @@ func TestValidateRejectsBadConfiguration(t *testing.T) {
 		})
 	}
 }
+
+func TestCreateTicketReturnsItsNumber(t *testing.T) {
+	f := newFakeServer(t)
+	c := newClient(t, f)
+
+	created, err := c.CreateTicket(ctx, receiver.NewTicket{CompanyID: 1, Title: "a", ExternalID: "am:abc", Priority: 1, Status: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if want := f.get("Tickets", int(created.ID))["ticketNumber"]; created.Number == "" || created.Number != want {
+		t.Errorf("Number = %q, want %v", created.Number, want)
+	}
+}
+
+func TestOpenAlertTicketsReturnsOpenTicketsOfEveryAlertGroup(t *testing.T) {
+	f := newFakeServer(t)
+	f.pageSize = 2
+	c := newClient(t, f)
+	create := func(externalID, recorded string) receiver.Ticket {
+		created, err := c.CreateTicket(ctx, receiver.NewTicket{CompanyID: 1, Title: "a", ExternalID: externalID, Priority: 1, Status: 1, RecordedAlerts: recorded})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return created
+	}
+	a := create("am:aaa", "aaaa")
+	done := create("am:bbb", "bbbb")
+	create("INC-20910-2021", "cccc")
+	dup := create("am:dup:ddd", "dddd")
+	e := create("am:eee", "eeee,ffff")
+	complete := 5
+	if err := c.UpdateTicket(ctx, done.ID, receiver.TicketUpdate{Status: &complete}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := c.OpenAlertTickets(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []receiver.Ticket{
+		{ID: a.ID, Number: a.Number, Status: 1, ExternalID: "am:aaa", RecordedAlerts: "aaaa"},
+		{ID: dup.ID, Number: dup.Number, Status: 1, ExternalID: "am:dup:ddd", RecordedAlerts: "dddd"},
+		{ID: e.ID, Number: e.Number, Status: 1, ExternalID: "am:eee", RecordedAlerts: "eeee,ffff"},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("OpenAlertTickets =\n%+v\nwant\n%+v", got, want)
+	}
+}

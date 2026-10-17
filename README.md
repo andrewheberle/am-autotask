@@ -14,6 +14,7 @@ Each Alertmanager alert group gets one Autotask ticket, raised against the compa
 - **Notes only on change.** A note is added when an alert fires that the ticket hasn't recorded yet, or a recorded alert resolves. Re-sends with nothing new (for example on `repeat_interval`) add nothing. The fingerprints of recorded alerts are kept in a Ticket UDF.
 - **Resolution.** When every alert in the group has resolved, a final note is added and the ticket is set to `ticket.resolvedstatus` (default 5, *Complete*).
 - **Closed tickets are never reopened.** If a group fires again after its ticket was completed, including when a technician completed it while alerts were still firing, a new ticket is created that references the previous one.
+- **Orphaned tickets are handed over.** Changing route matchers, `group_by` or how routes nest gives the affected groups new group keys, leaving their open tickets behind. Alertmanager then sends the alerts again under the new keys. When a firing alert is still recorded on another group's open ticket, that ticket is orphaned: the alert is noted there as moved, naming its new ticket, and is no longer recorded on it. Once all its alerts have moved, the orphaned ticket is set to `ticket.resolvedstatus`. A new ticket that takes over alerts says which ticket it continues.
 - **Retries.** Temporary Autotask failures (timeouts, 5xx, 429) return HTTP 500 so Alertmanager retries the notification. Permanent failures (Autotask rejecting the request) are logged with the payload and acknowledged so they are not retried forever.
 
 See [GLOSSARY.md](GLOSSARY.md) for the terms used here.
@@ -153,13 +154,14 @@ docker run -v ./config.yaml:/etc/am-autotask/config.yaml \
 | `POST /webhook` | Alertmanager webhook receiver. Requires `Authorization: Bearer <webhook.token>`. |
 | `GET /healthz` | Always `200` while the process is running. |
 | `GET /readyz` | `200` once Autotask has been reached, configuration validated and company selectors loaded. Until then notifications are answered with `500`, so Alertmanager retries them. |
-| `GET /metrics` | Prometheus metrics, prefixed `am_autotask_`: notifications by result, tickets and notes created, Autotask errors by operation and kind (including rate limiting), and the age of the company selectors. |
+| `GET /metrics` | Prometheus metrics, prefixed `am_autotask_`: notifications by result, tickets and notes created, alerts moved off orphaned tickets and orphaned tickets completed, Autotask errors by operation and kind (including rate limiting), and the age of the company selectors. |
 
 ## Limitations
 
 - The receiver runs as a single instance. Handling of each alert group is serialised in-process, behind an interface so a shared lock can be added to support replicas.
 - If more than one open ticket is ever found for a group, the oldest is used and each other one gets a note naming it and has its `externalID` changed to `am:dup:…` so it is warned only once. Merging is left to a person.
 - The Ticket UDF holds the fingerprints of about 450 alerts. Beyond that a group stops recording individual alerts: a note says so, further changes are not noted, and the group resolving still completes the ticket.
-- Changing route matchers, `group_by` or how routes nest changes the group keys of the affected groups. Their open tickets are no longer found, so they receive no further notes and are never completed; complete them by hand after such a change. New tickets are raised as the groups fire under their new keys.
+- Orphaned tickets are only handed over for alerts that fire again under a new group key. A ticket is left open, and must be completed by hand, if its alerts resolve within `group_wait` of the configuration change, are removed from Alertmanager, or it had too many alerts to record them individually.
+- Each notification with firing alerts makes one extra Autotask query to look for orphaned tickets, returning every open am-autotask ticket.
 - An alert only counts as resolved when Alertmanager sends it with `status: resolved`; an alert missing from a notification stays recorded until then, or until the whole group resolves.
 - Autotask limits API use to 10,000 requests an hour per database, shared with every other integration, and three concurrent requests per endpoint. The receiver makes at most three concurrent requests.
