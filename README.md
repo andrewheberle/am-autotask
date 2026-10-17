@@ -175,7 +175,7 @@ Log lines written while handling a notification carry its `trace_id` and `span_i
 
 ```sh
 docker run -v ./config.yaml:/etc/am-autotask/config.yaml \
-  ghcr.io/andrewheberle/am-autotask:v0.3.0 --config /etc/am-autotask/config.yaml # x-release-please-version
+  ghcr.io/andrewheberle/am-autotask:v0.4.0 --config /etc/am-autotask/config.yaml # x-release-please-version
 ```
 
 ### Examples

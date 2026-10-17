@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/andrewheberle/am-autotask/compare/v0.3.0...v0.4.0) (2026-10-17)
+
+
+### Features
+
+* add OpenTelemetry tracing of notifications ([#13](https://github.com/andrewheberle/am-autotask/issues/13)) ([0f47630](https://github.com/andrewheberle/am-autotask/commit/0f47630cac40b9a680e5e0db0eceab18d8a93c1f))
+
 ## [0.3.0](https://github.com/andrewheberle/am-autotask/compare/v0.2.0...v0.3.0) (2026-10-17)
 
 
