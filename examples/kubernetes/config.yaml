@@ -1,0 +1,18 @@
+# am-autotask settings, loaded into a ConfigMap by kustomization.yaml.
+# Secrets are read from the am-autotask Secret, mounted at
+# /run/secrets/am-autotask. See the README for every setting.
+webhook:
+  tokenfile: /run/secrets/am-autotask/webhook-token
+autotask:
+  usernamefile: /run/secrets/am-autotask/autotask-username
+  secretfile: /run/secrets/am-autotask/autotask-secret
+  integrationcodefile: /run/secrets/am-autotask/autotask-integrationcode
+company:
+  # replace with the ID of your catch-all company
+  catchall: 175
+ticket:
+  # replace with your Autotask instance's priority IDs
+  priorities:
+    critical: 4
+    warning: 2
+  defaultpriority: 3

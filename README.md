@@ -147,6 +147,11 @@ docker run -v ./config.yaml:/etc/am-autotask/config.yaml \
   ghcr.io/andrewheberle/am-autotask:v0.2.0 --config /etc/am-autotask/config.yaml # x-release-please-version
 ```
 
+### Examples
+
+- [Docker Compose](examples/compose/): am-autotask with Alertmanager and Prometheus, including the self-monitoring rules.
+- [Kubernetes](examples/kubernetes/): a Deployment, Service and optional ServiceMonitor, applied with Kustomize.
+
 ### Endpoints
 
 | Path | Description |
