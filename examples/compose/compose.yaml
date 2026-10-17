@@ -1,0 +1,57 @@
+# am-autotask with Alertmanager sending it notifications and Prometheus
+# scraping both and evaluating the self-monitoring rules. See README.md.
+name: am-autotask
+
+services:
+  am-autotask:
+    image: ghcr.io/andrewheberle/am-autotask:v0.2.0 # x-release-please-version
+    command: ["--config=/etc/am-autotask/config.yaml"]
+    restart: unless-stopped
+    read_only: true
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./am-autotask.yaml:/etc/am-autotask/config.yaml:ro
+    secrets:
+      - webhook-token
+      - autotask-username
+      - autotask-secret
+      - autotask-integrationcode
+
+  alertmanager:
+    image: quay.io/prometheus/alertmanager:v0.34.1
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml", "--storage.path=/alertmanager"]
+    restart: unless-stopped
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager:/alertmanager
+    secrets:
+      - webhook-token
+
+  prometheus:
+    image: quay.io/prometheus/prometheus:v3.15.0
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../prometheus/am-autotask.rules.yml:/etc/prometheus/rules/am-autotask.rules.yml:ro
+      - prometheus:/prometheus
+
+# each secret is mounted at /run/secrets/<name>; create the files first
+secrets:
+  webhook-token:
+    file: ./secrets/webhook-token
+  autotask-username:
+    file: ./secrets/autotask-username
+  autotask-secret:
+    file: ./secrets/autotask-secret
+  autotask-integrationcode:
+    file: ./secrets/autotask-integrationcode
+
+volumes:
+  alertmanager:
+  prometheus:

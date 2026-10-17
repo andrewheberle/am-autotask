@@ -1,0 +1,23 @@
+route:
+  receiver: autotask
+  # labels used in company selectors must be listed here
+  group_by: ["alertname", "tenant_id"]
+  routes:
+    # am-autotask's own alerts go elsewhere: a broken am-autotask cannot
+    # raise a ticket about itself
+    - receiver: ops
+      matchers:
+        - alertname=~"AmAutotask.*|AlertmanagerAutotaskNotificationsFailing"
+
+receivers:
+  - name: autotask
+    webhook_configs:
+      - url: http://am-autotask:8080/webhook
+        send_resolved: true
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /run/secrets/webhook-token
+
+  # add an email, chat or paging integration here
+  - name: ops

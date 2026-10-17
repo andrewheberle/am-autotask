@@ -1,0 +1,17 @@
+# Optional: for the Prometheus Operator. Add this file to the resources in
+# kustomization.yaml to have Prometheus scrape am-autotask's /metrics.
+# The example alerting rules expect job="am-autotask", which the Prometheus
+# Operator takes from the Service name.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: am-autotask
+  labels:
+    app.kubernetes.io/name: am-autotask
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: am-autotask
+  endpoints:
+    - port: http
+      path: /metrics

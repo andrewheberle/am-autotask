@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: am-autotask
+  labels:
+    app.kubernetes.io/name: am-autotask
+spec:
+  # am-autotask runs as a single instance: alert groups are serialised in
+  # memory, so two pods could race to create the same ticket. Recreate stops
+  # the old pod before starting the new one during a rollout.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: am-autotask
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: am-autotask
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      # am-autotask allows 30 seconds for in-flight requests on shutdown
+      terminationGracePeriodSeconds: 35
+      containers:
+        - name: am-autotask
+          image: ghcr.io/andrewheberle/am-autotask:v0.2.0 # x-release-please-version
+          args:
+            - --config=/etc/am-autotask/config.yaml
+          ports:
+            - name: http
+              containerPort: 8080
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/am-autotask
+              readOnly: true
+            - name: secrets
+              mountPath: /run/secrets/am-autotask
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: am-autotask
+        - name: secrets
+          secret:
+            secretName: am-autotask
