@@ -1,0 +1,11 @@
+.git/
+.github/
+.editorconfig
+.gitignore
+.goreleaser.yaml
+.release-please-manifest.json
+AGENTS.md
+LICENSE
+README.md
+release-please-config.json
+renovate.json
