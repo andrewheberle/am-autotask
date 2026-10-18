@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -81,7 +82,7 @@ func AddFlags(f *pflag.FlagSet) {
 	f.String("webhook.token", "", "bearer token Alertmanager must send (required)")
 	f.String("webhook.tokenfile", "", "file containing webhook.token")
 
-	f.Int64("company.catchall", 0, "ID of the catch-all company (required)")
+	f.Var(&optionalID{}, "company.catchall", "ID of the catch-all company, which may be 0 for your own company (required)")
 	f.String("company.udf", "Alertmanager Selectors", "name of the Company UDF holding company selectors")
 	f.Duration("company.refresh", 15*time.Minute, "how often company selectors are reloaded")
 	f.Duration("company.missrefresh", time.Minute, "minimum time between reloads when an alert group matches no company")
@@ -154,11 +155,18 @@ func FromFlags(f *pflag.FlagSet) (Config, error) {
 		},
 	}
 
+	// company 0 is the instance's own company, so only an unset value is
+	// missing; the flag is empty unless given
+	if v := k.String("company.catchall"); v == "" {
+		errs = append(errs, errors.New("company.catchall is required"))
+	} else if _, err := strconv.ParseInt(v, 10, 64); err != nil {
+		errs = append(errs, fmt.Errorf("company.catchall %q is not an ID", v))
+	}
+
 	required := []struct {
 		key string
 		set bool
 	}{
-		{"company.catchall", cfg.Receiver.CatchAllCompanyID != 0},
 		{"ticket.defaultpriority", cfg.Receiver.DefaultPriority != 0},
 		{"ticket.status", cfg.Receiver.Status != 0},
 		{"note.type", cfg.Receiver.NoteType != 0},
@@ -223,6 +231,33 @@ func requiredSecrets(k configger.Config, keys []string) (map[string]string, []er
 		values[key] = v
 	}
 	return values, errs
+}
+
+// optionalID is an ID flag that is empty until set, so that unset can be told
+// apart from 0.
+type optionalID struct {
+	value *int64
+}
+
+func (o *optionalID) String() string {
+	if o.value == nil {
+		return ""
+	}
+	return strconv.FormatInt(*o.value, 10)
+}
+
+func (o *optionalID) Set(s string) error {
+	v, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return err
+	}
+	o.value = &v
+	return nil
+}
+
+// Type is not "int64", which configger would read as 0 when unset.
+func (o *optionalID) Type() string {
+	return "id"
 }
 
 // secret returns the value of key, read from the file named by "<key>file"

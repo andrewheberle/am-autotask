@@ -120,6 +120,7 @@ type CompanyMatcher interface {
 
 // Options configures ticket and note creation.
 type Options struct {
+	// CatchAllCompanyID may be 0, the Autotask instance's own company.
 	CatchAllCompanyID int64
 
 	// SeverityLabel is the common label mapped to a priority via
@@ -198,9 +199,6 @@ type Receiver struct {
 
 // New returns a Receiver.
 func New(at Autotask, matcher CompanyMatcher, locker Locker, opts Options) (*Receiver, error) {
-	if opts.CatchAllCompanyID == 0 {
-		return nil, errors.New("catch-all company ID is required")
-	}
 	if opts.DefaultPriority == 0 {
 		return nil, errors.New("default priority is required")
 	}
