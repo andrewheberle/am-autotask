@@ -409,3 +409,21 @@ func TestCatchAllCompany(t *testing.T) {
 		})
 	}
 }
+
+func TestInvalidConfigurationIsListedOnePerLine(t *testing.T) {
+	f := pflag.NewFlagSet("lookup", pflag.ContinueOnError)
+	config.AddAutotaskFlags(f)
+	if err := f.Parse(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := config.AutotaskFromFlags(f)
+
+	want := `invalid configuration:
+  - autotask.username (or autotask.usernamefile) is required
+  - autotask.secret (or autotask.secretfile) is required
+  - autotask.integrationcode (or autotask.integrationcodefile) is required`
+	if err == nil || err.Error() != want {
+		t.Errorf("err = %v, want:\n%s", err, want)
+	}
+}
