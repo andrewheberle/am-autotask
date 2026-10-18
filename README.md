@@ -76,7 +76,7 @@ Only webhook payload version 4 is accepted; anything else is rejected with HTTP 
 
 Settings come from command line flags, a YAML file named by `--config`, and environment variables prefixed `AM_AUTOTASK_`, loaded with [configger](https://github.com/andrewheberle/configger). Later sources override earlier ones in this order: flag defaults, configuration file, environment variables, flags given on the command line.
 
-Every setting has a flag. The environment variable for a setting is its flag name in upper case with `.` replaced by `_`, and its value is read the same way as the flag's. For example, `webhook.token` is `AM_AUTOTASK_WEBHOOK_TOKEN`, and `ticket.priorities` is `AM_AUTOTASK_TICKET_PRIORITIES=critical=4,warning=2`. A map such as `ticket.priorities` set by a higher source replaces the map from a lower one; the two are not merged.
+Every setting has a flag on `serve`. The environment variable for a setting is its flag name in upper case with `.` replaced by `_`, and its value is read the same way as the flag's. For example, `webhook.token` is `AM_AUTOTASK_WEBHOOK_TOKEN`, and `ticket.priorities` is `AM_AUTOTASK_TICKET_PRIORITIES=critical=4,warning=2`. A map such as `ticket.priorities` set by a higher source replaces the map from a lower one; the two are not merged.
 
 ### Secrets
 
@@ -171,11 +171,17 @@ Log lines written while handling a notification carry its `trace_id` and `span_i
 
 ## Running
 
+The receiver runs as the `serve` subcommand, which takes the flags under [Configuration](#configuration). Before v0.5.0 the receiver ran without a subcommand, so add `serve` before any existing arguments when upgrading. `am-autotask --version` prints the version.
+
+```sh
+am-autotask serve --config config.yaml
+```
+
 ### Docker
 
 ```sh
 docker run -v ./config.yaml:/etc/am-autotask/config.yaml \
-  ghcr.io/andrewheberle/am-autotask:v0.4.0 --config /etc/am-autotask/config.yaml # x-release-please-version
+  ghcr.io/andrewheberle/am-autotask:v0.4.0 serve --config /etc/am-autotask/config.yaml # x-release-please-version
 ```
 
 ### Examples
