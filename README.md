@@ -54,9 +54,9 @@ ticket.queue (Tickets queueID)
 `am-autotask lookup companies NAME` lists the companies whose name contains `NAME`, ignoring case:
 
 ```console
-$ am-autotask lookup companies --config config.yaml "r-group"
+$ am-autotask lookup companies --config config.yaml "xyz group"
 ID   NAME
-175  R-Group International
+175  XYZ Group Ltd
 ```
 
 Both list only active values and companies, as inactive ones are rejected at startup. `--all` includes inactive ones, with an `ACTIVE` column. With Docker, run the image with `lookup` in place of `serve`:
