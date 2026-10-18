@@ -54,11 +54,8 @@ type Autotask struct {
 // secrets may be given directly or, as "<key>file", as a file path
 var secrets = []string{"webhook.token", "autotask.username", "autotask.secret", "autotask.integrationcode"}
 
-func flags(name string) *pflag.FlagSet {
-	f := pflag.NewFlagSet(name, pflag.ContinueOnError)
-	// the caller prints usage, with the version, on pflag.ErrHelp
-	f.Usage = func() {}
-
+// AddFlags adds a command line flag for every setting to f.
+func AddFlags(f *pflag.FlagSet) {
 	f.String("config", "", "path to YAML configuration file")
 	f.String("listen", ":8080", "address to listen on")
 	f.String("log.level", "info", "log level (debug, info, warn, error)")
@@ -96,23 +93,12 @@ func flags(name string) *pflag.FlagSet {
 
 	f.Int("note.type", 1, "note type ID of ticket notes")
 	f.Int("note.publish", 2, "publish (visibility) ID of ticket notes")
-
-	return f
 }
 
-// Usage returns the flag help text.
-func Usage() string {
-	return flags("am-autotask").FlagUsages()
-}
-
-// Load parses args (without the program name) and loads the configuration.
-// It returns [pflag.ErrHelp] if help was requested.
-func Load(args []string) (Config, error) {
-	f := flags("am-autotask")
-	if err := f.Parse(args); err != nil {
-		return Config{}, err
-	}
-
+// FromFlags loads the configuration from f, which holds the flags added by
+// [AddFlags] already parsed, with unset flags taken from environment variables
+// and then the configuration file.
+func FromFlags(f *pflag.FlagSet) (Config, error) {
 	k, err := configger.LoadConfig(f, configger.WithEnvPrefix(EnvPrefix))
 	if err != nil {
 		return Config{}, err

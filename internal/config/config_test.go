@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/pflag"
+
 	"github.com/andrewheberle/am-autotask/internal/autotask"
 	"github.com/andrewheberle/am-autotask/internal/config"
 )
@@ -40,9 +42,19 @@ func writeFile(t *testing.T, name, content string) string {
 	return path
 }
 
+// loadArgs parses args as a command would, then loads the configuration.
+func loadArgs(args []string) (config.Config, error) {
+	f := pflag.NewFlagSet("serve", pflag.ContinueOnError)
+	config.AddFlags(f)
+	if err := f.Parse(args); err != nil {
+		return config.Config{}, err
+	}
+	return config.FromFlags(f)
+}
+
 func load(t *testing.T, args ...string) config.Config {
 	t.Helper()
-	cfg, err := config.Load(args)
+	cfg, err := loadArgs(args)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -191,7 +203,7 @@ ticket:
 }
 
 func TestSecretSetBothWaysIsRejected(t *testing.T) {
-	_, err := config.Load([]string{
+	_, err := loadArgs([]string{
 		"--config", writeFile(t, "c.yaml", minimalYAML),
 		"--webhook.tokenfile", writeFile(t, "token", "other"),
 	})
@@ -212,7 +224,7 @@ func TestSecretWithCommaFromEnvIsKeptIntact(t *testing.T) {
 }
 
 func TestMissingRequiredSettingsAreAllReported(t *testing.T) {
-	_, err := config.Load(nil)
+	_, err := loadArgs(nil)
 	if err == nil {
 		t.Fatal("expected an error")
 	}
@@ -271,7 +283,7 @@ func TestTracingExporter(t *testing.T) {
 		})
 	}
 
-	_, err := config.Load([]string{"--config", writeFile(t, "c.yaml", minimalYAML), "--tracing.exporter", "jaeger"})
+	_, err := loadArgs([]string{"--config", writeFile(t, "c.yaml", minimalYAML), "--tracing.exporter", "jaeger"})
 	if err == nil || !strings.Contains(err.Error(), "tracing.exporter") {
 		t.Errorf("err = %v, want one naming tracing.exporter", err)
 	}
