@@ -24,10 +24,47 @@ See [GLOSSARY.md](GLOSSARY.md) for the terms used here.
 1. **Create an API user** (security level *API User (system)* or equivalent with access to companies, tickets and ticket notes), and note its user name, secret and API tracking identifier (integration code).
 2. **Create a Company UDF**, by default named `Alertmanager Selectors`. Use a text field (multi-line, if you want several selectors). This holds each company's company selectors.
 3. **Create a Ticket UDF**, by default named `Alertmanager Recorded Alerts`. Use a text field. The receiver manages its contents; it should not be edited by hand.
-4. **Choose the catch-all company**, for example your own company, and note its ID.
-5. **Find the picklist IDs** to use: the priority for each severity, plus any queue, issue type, sub-issue type or category you want. Configuration always uses numeric IDs, never labels, as labels vary by instance and language.
+4. **Choose the catch-all company**, for example your own company, and note its ID. `am-autotask lookup companies` finds it (see [Finding IDs](#finding-ids)).
+5. **Find the picklist IDs** to use: the priority for each severity, plus any queue, issue type, sub-issue type or category you want. Configuration always uses numeric IDs, never labels, as labels vary by instance and language. The Autotask UI mostly shows labels, so use `am-autotask lookup picklists` to list the IDs.
 
 At startup the receiver checks every configured ID against Autotask, along with both UDFs and the catch-all company, and refuses to start if anything is missing or inactive.
+
+### Finding IDs
+
+The `lookup` commands print the IDs that settings take, using the API user from step 1. They read the `autotask.*` settings from the same flags, environment variables and configuration file as `serve`, and ignore every other setting, so they can run before the rest of the configuration is filled in.
+
+`am-autotask lookup picklists` lists the values of every picklist setting, labelled with the settings that use them. Sub-issue types are listed with the issue type they belong to, as `ticket.subissuetype` must belong to `ticket.issuetype`.
+
+```console
+$ am-autotask lookup picklists --config config.yaml
+ticket.priorities, ticket.defaultpriority (Tickets priority)
+  ID  LABEL
+  4   Critical
+  1   High
+  2   Medium
+  3   Low
+
+ticket.queue (Tickets queueID)
+  ID        LABEL
+  8         Service Desk
+  29682833  Monitoring
+...
+```
+
+`am-autotask lookup companies NAME` lists the companies whose name contains `NAME`, ignoring case:
+
+```console
+$ am-autotask lookup companies --config config.yaml "r-group"
+ID   NAME
+175  R-Group International
+```
+
+Both list only active values and companies, as inactive ones are rejected at startup. `--all` includes inactive ones, with an `ACTIVE` column. With Docker, run the image with `lookup` in place of `serve`:
+
+```sh
+docker run --rm -v ./config.yaml:/etc/am-autotask/config.yaml \
+  ghcr.io/andrewheberle/am-autotask:v0.4.0 lookup picklists --config /etc/am-autotask/config.yaml # x-release-please-version
+```
 
 ### Company selectors
 
@@ -171,7 +208,7 @@ Log lines written while handling a notification carry its `trace_id` and `span_i
 
 ## Running
 
-The receiver runs as the `serve` subcommand, which takes the flags under [Configuration](#configuration). Before v0.5.0 the receiver ran without a subcommand, so add `serve` before any existing arguments when upgrading. `am-autotask --version` prints the version.
+The receiver runs as the `serve` subcommand, which takes the flags under [Configuration](#configuration); the `lookup` commands are described under [Finding IDs](#finding-ids). Before v0.5.0 the receiver ran without a subcommand, so add `serve` before any existing arguments when upgrading. `am-autotask --version` prints the version.
 
 ```sh
 am-autotask serve --config config.yaml
