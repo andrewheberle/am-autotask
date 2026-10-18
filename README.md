@@ -27,7 +27,7 @@ See [GLOSSARY.md](GLOSSARY.md) for the terms used here.
 4. **Choose the catch-all company**, for example your own company, and note its ID.
 5. **Find the picklist IDs** to use: the priority for each severity, plus any queue, issue type, sub-issue type or category you want. Configuration always uses numeric IDs, never labels, as labels vary by instance and language.
 
-At startup the receiver checks every configured ID against Autotask, along with both UDFs and the catch-all company, and refuses to start if anything is missing or inactive.
+At startup the receiver checks every configured ID against Autotask, along with both UDFs and the catch-all company, and refuses to start if anything is missing or inactive. A rejected picklist ID is reported with the setting it came from and the active values of that picklist, for example `ticket.queue: Tickets queueID has no value 99; active values are 8 (Service Desk), 29682833 (Monitoring)`.
 
 ### Company selectors
 
