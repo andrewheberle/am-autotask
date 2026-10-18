@@ -79,13 +79,27 @@ func checkPicklist(fields []fieldInfo, chk PicklistCheck) error {
 				continue
 			}
 			if !v.IsActive {
-				return fmt.Errorf("%s: %s %s value %d (%s) is inactive", chk.Setting, chk.Entity, chk.Field, chk.Value, v.Label)
+				return fmt.Errorf("%s: %s %s value %d (%s) is inactive; %s", chk.Setting, chk.Entity, chk.Field, chk.Value, v.Label, activeValues(f))
 			}
 			return nil
 		}
-		return fmt.Errorf("%s: %s %s has no value %d", chk.Setting, chk.Entity, chk.Field, chk.Value)
+		return fmt.Errorf("%s: %s %s has no value %d; %s", chk.Setting, chk.Entity, chk.Field, chk.Value, activeValues(f))
 	}
 	return fmt.Errorf("%s: %s has no field %s", chk.Setting, chk.Entity, chk.Field)
+}
+
+// activeValues describes the values of a picklist field that may be used.
+func activeValues(f fieldInfo) string {
+	var values []string
+	for _, v := range f.PicklistValues {
+		if v.IsActive {
+			values = append(values, fmt.Sprintf("%s (%s)", v.Value, v.Label))
+		}
+	}
+	if len(values) == 0 {
+		return "it has no active values"
+	}
+	return "active values are " + strings.Join(values, ", ")
 }
 
 func (c *Client) checkUDF(ctx context.Context, entity, name string) error {

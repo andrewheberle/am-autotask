@@ -347,10 +347,14 @@ func TestValidateRejectsBadConfiguration(t *testing.T) {
 	}{
 		{"unknown picklist value", func(_ *fakeServer, c []autotask.PicklistCheck) []autotask.PicklistCheck {
 			return append(c, autotask.PicklistCheck{Entity: "Tickets", Field: "priority", Value: 7, Setting: "ticket.priorities.warning"})
-		}, 1, "ticket.priorities.warning"},
+		}, 1, "ticket.priorities.warning: Tickets priority has no value 7; active values are 4 (P1 - Critical), 3 (P4 - Low)"},
 		{"inactive picklist value", func(_ *fakeServer, c []autotask.PicklistCheck) []autotask.PicklistCheck {
 			return append(c, autotask.PicklistCheck{Entity: "Tickets", Field: "priority", Value: 9, Setting: "ticket.priorities.info"})
-		}, 1, "ticket.priorities.info"},
+		}, 1, "ticket.priorities.info: Tickets priority value 9 (Old) is inactive; active values are 4 (P1 - Critical), 3 (P4 - Low)"},
+		{"picklist with no active values", func(f *fakeServer, c []autotask.PicklistCheck) []autotask.PicklistCheck {
+			f.fields["Tickets"] = append(f.fields["Tickets"], picklist("queueID", pv(7, "Closed", false)))
+			return append(c, autotask.PicklistCheck{Entity: "Tickets", Field: "queueID", Value: 8, Setting: "ticket.queue"})
+		}, 1, "ticket.queue: Tickets queueID has no value 8; it has no active values"},
 		{"missing recorded alerts UDF", func(f *fakeServer, c []autotask.PicklistCheck) []autotask.PicklistCheck {
 			f.udfs["Tickets"] = nil
 			return c
