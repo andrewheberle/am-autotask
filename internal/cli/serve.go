@@ -79,6 +79,16 @@ func (c *serveCommand) Run(ctx context.Context, cd *simplecobra.Commandeer, args
 	logger := slog.New(tracing.LogHandler(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.LogLevel})))
 	slog.SetDefault(logger)
 
+	// from here errors go to the JSON log, so log collectors see them
+	if err := c.serve(ctx, cfg, logger); err != nil {
+		logger.Error("exiting", "error", err)
+		return &reportedError{err}
+	}
+	return nil
+}
+
+func (c *serveCommand) serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
+
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

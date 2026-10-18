@@ -3,8 +3,11 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/bep/simplecobra"
 )
 
 func TestExecute(t *testing.T) {
@@ -29,7 +32,7 @@ func TestExecute(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("AM_AUTOTASK_CONFIG", "")
 
-			err := Execute(context.Background(), tt.args, "v1.2.3")
+			err := execute(context.Background(), tt.args, "v1.2.3")
 
 			switch {
 			case tt.wantIs != nil:
@@ -45,6 +48,32 @@ func TestExecute(t *testing.T) {
 				}
 			case err != nil:
 				t.Errorf("err = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestReport(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		wantCode int
+		want     string
+	}{
+		{"success", nil, 0, ""},
+		{"error", errors.New("invalid configuration:\n  - a is required\n  - b is required"), 1, "Error: invalid configuration:\n  - a is required\n  - b is required\n"},
+		{"command line", &simplecobra.CommandError{Err: errors.New("unknown flag: --x")}, 1, "Error: unknown flag: --x\n"},
+		{"already logged", fmt.Errorf("starting: %w", &reportedError{errors.New("boom")}), 1, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var b strings.Builder
+
+			if code := report(&b, tt.err); code != tt.wantCode {
+				t.Errorf("exit code = %d, want %d", code, tt.wantCode)
+			}
+			if got := b.String(); got != tt.want {
+				t.Errorf("printed %q, want %q", got, tt.want)
 			}
 		})
 	}

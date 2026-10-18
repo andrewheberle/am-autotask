@@ -188,8 +188,8 @@ func FromFlags(f *pflag.FlagSet) (Config, error) {
 		errs = append(errs, errors.New("company.refresh must be positive"))
 	}
 
-	if err := errors.Join(errs...); err != nil {
-		return Config{}, fmt.Errorf("invalid configuration:\n%w", err)
+	if len(errs) > 0 {
+		return Config{}, &invalidError{errs}
 	}
 	return cfg, nil
 }
@@ -204,8 +204,8 @@ func AutotaskFromFlags(f *pflag.FlagSet) (Autotask, error) {
 	}
 
 	values, errs := requiredSecrets(k, autotaskSecrets)
-	if err := errors.Join(errs...); err != nil {
-		return Autotask{}, fmt.Errorf("invalid configuration:\n%w", err)
+	if len(errs) > 0 {
+		return Autotask{}, &invalidError{errs}
 	}
 	return Autotask{
 		Username:        values["autotask.username"],
@@ -258,6 +258,25 @@ func (o *optionalID) Set(s string) error {
 // Type is not "int64", which configger would read as 0 when unset.
 func (o *optionalID) Type() string {
 	return "id"
+}
+
+// invalidError lists every problem with the configuration, one per line.
+type invalidError struct {
+	errs []error
+}
+
+func (e *invalidError) Error() string {
+	var b strings.Builder
+	b.WriteString("invalid configuration:")
+	for _, err := range e.errs {
+		b.WriteString("\n  - ")
+		b.WriteString(err.Error())
+	}
+	return b.String()
+}
+
+func (e *invalidError) Unwrap() []error {
+	return e.errs
 }
 
 // secret returns the value of key, read from the file named by "<key>file"

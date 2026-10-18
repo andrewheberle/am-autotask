@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"log/slog"
 	"os"
 
 	"github.com/andrewheberle/am-autotask/internal/cli"
@@ -14,8 +13,5 @@ import (
 var Version = "dev"
 
 func main() {
-	if err := cli.Execute(context.Background(), os.Args[1:], Version); err != nil {
-		slog.Error("exiting", "error", err)
-		os.Exit(1)
-	}
+	os.Exit(cli.Execute(context.Background(), os.Args[1:], Version))
 }
