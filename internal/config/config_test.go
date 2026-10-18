@@ -363,3 +363,49 @@ func TestAutotaskFromFlags(t *testing.T) {
 		})
 	}
 }
+
+func TestCatchAllCompany(t *testing.T) {
+	// minimalYAML without its company block
+	noCatchAll := strings.Replace(minimalYAML, "company:\n  catchall: 175\n", "", 1)
+
+	tests := []struct {
+		name    string
+		yaml    string
+		env     map[string]string
+		args    []string
+		want    int64
+		wantErr string
+	}{
+		{name: "from file", yaml: minimalYAML, want: 175},
+		// company 0 is the Autotask instance's own company
+		{name: "own company from file", yaml: noCatchAll + "company:\n  catchall: 0\n", want: 0},
+		{name: "own company from flag", yaml: noCatchAll, args: []string{"--company.catchall", "0"}, want: 0},
+		{name: "own company from env", yaml: noCatchAll, env: map[string]string{"AM_AUTOTASK_COMPANY_CATCHALL": "0"}, want: 0},
+		{name: "flag overrides file", yaml: minimalYAML, args: []string{"--company.catchall", "0"}, want: 0},
+		{name: "unset", yaml: noCatchAll, wantErr: "company.catchall is required"},
+		{name: "not a number in file", yaml: noCatchAll + "company:\n  catchall: abc\n", wantErr: `company.catchall "abc" is not an ID`},
+		{name: "not a number as flag", yaml: noCatchAll, args: []string{"--company.catchall", "abc"}, wantErr: "company.catchall"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+
+			cfg, err := loadArgs(append([]string{"--config", writeFile(t, "c.yaml", tt.yaml)}, tt.args...))
+
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("err = %v, want one containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Receiver.CatchAllCompanyID != tt.want {
+				t.Errorf("CatchAllCompanyID = %d, want %d", cfg.Receiver.CatchAllCompanyID, tt.want)
+			}
+		})
+	}
+}

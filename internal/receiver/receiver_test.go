@@ -92,15 +92,29 @@ func TestExternalIDIsDerivedFromGroupKey(t *testing.T) {
 }
 
 func TestUnmatchedGroupGoesToCatchAllCompany(t *testing.T) {
-	at := newFakeAutotask()
-	r := newReceiver(t, at, testOptions())
+	tests := []struct {
+		name     string
+		catchAll int64
+	}{
+		{"company", catchAll},
+		// company 0 is the Autotask instance's own company
+		{"own company", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			at := newFakeAutotask()
+			opts := testOptions()
+			opts.CatchAllCompanyID = tt.catchAll
+			r := newReceiver(t, at, opts)
 
-	n := notification(hostAlert("aaaa", "firing", "web1"))
-	n.GroupLabels["tenant_id"] = "unknown"
-	handle(t, r, n)
+			n := notification(hostAlert("aaaa", "firing", "web1"))
+			n.GroupLabels["tenant_id"] = "unknown"
+			handle(t, r, n)
 
-	if got := onlyTicket(t, at).CompanyID; got != catchAll {
-		t.Errorf("CompanyID = %d, want catch-all %d", got, catchAll)
+			if got := onlyTicket(t, at).CompanyID; got != tt.catchAll {
+				t.Errorf("CompanyID = %d, want catch-all %d", got, tt.catchAll)
+			}
+		})
 	}
 }
 

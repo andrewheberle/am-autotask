@@ -24,7 +24,7 @@ See [GLOSSARY.md](GLOSSARY.md) for the terms used here.
 1. **Create an API user** (security level *API User (system)* or equivalent with access to companies, tickets and ticket notes), and note its user name, secret and API tracking identifier (integration code).
 2. **Create a Company UDF**, by default named `Alertmanager Selectors`. Use a text field (multi-line, if you want several selectors). This holds each company's company selectors.
 3. **Create a Ticket UDF**, by default named `Alertmanager Recorded Alerts`. Use a text field. The receiver manages its contents; it should not be edited by hand.
-4. **Choose the catch-all company**, for example your own company, and note its ID. `am-autotask lookup companies` finds it (see [Finding IDs](#finding-ids)).
+4. **Choose the catch-all company**, for example your own company, and note its ID. Your own company always has ID `0`. `am-autotask lookup companies` finds it (see [Finding IDs](#finding-ids)).
 5. **Find the picklist IDs** to use: the priority for each severity, plus any queue, issue type, sub-issue type or category you want. Configuration always uses numeric IDs, never labels, as labels vary by instance and language. The Autotask UI mostly shows labels, so use `am-autotask lookup picklists` to list the IDs.
 
 At startup the receiver checks every configured ID against Autotask, along with both UDFs and the catch-all company, and refuses to start if anything is missing or inactive. A rejected picklist ID is reported with the setting it came from and the active values of that picklist, for example `ticket.queue: Tickets queueID has no value 99; active values are 8 (Service Desk), 29682833 (Monitoring)`.
@@ -134,7 +134,7 @@ Each secret can be given directly or as a path to a file containing it, which su
 | `log.level` | `info` | `debug`, `info`, `warn` or `error`. Logs are JSON on stderr. |
 | `tracing.exporter` | `none` | `none`, `otlp` or `console`. See [Tracing](#tracing). |
 | `autotask.zoneurl` | Autotask's zone information URL | The API zone for the user is discovered here at startup. |
-| `company.catchall` | | ID of the catch-all company. Required. |
+| `company.catchall` | | ID of the catch-all company. Required; `0` is your own company. |
 | `company.udf` | `Alertmanager Selectors` | Name of the Company UDF holding company selectors. |
 | `company.refresh` | `15m` | How often company selectors are reloaded. |
 | `company.missrefresh` | `1m` | Minimum time between reloads triggered by a group matching no company. |
