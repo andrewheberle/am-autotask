@@ -268,6 +268,11 @@ func matchesAll(e entity, filters []filter) bool {
 			if !present || !strings.HasPrefix(strings.ToLower(s), strings.ToLower(fmt.Sprint(flt.Value))) {
 				return false
 			}
+		case "contains":
+			s, _ := v.(string)
+			if !present || !strings.Contains(strings.ToLower(s), strings.ToLower(fmt.Sprint(flt.Value))) {
+				return false
+			}
 		default:
 			panic("fake server does not support op " + flt.Op)
 		}

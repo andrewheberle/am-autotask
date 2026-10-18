@@ -52,17 +52,15 @@ type Autotask struct {
 }
 
 // secrets may be given directly or, as "<key>file", as a file path
-var secrets = []string{"webhook.token", "autotask.username", "autotask.secret", "autotask.integrationcode"}
+var (
+	autotaskSecrets = []string{"autotask.username", "autotask.secret", "autotask.integrationcode"}
+	secrets         = append([]string{"webhook.token"}, autotaskSecrets...)
+)
 
-// AddFlags adds a command line flag for every setting to f.
-func AddFlags(f *pflag.FlagSet) {
+// AddAutotaskFlags adds the flags for the configuration file and the Autotask
+// API settings to f, for commands that only talk to Autotask.
+func AddAutotaskFlags(f *pflag.FlagSet) {
 	f.String("config", "", "path to YAML configuration file")
-	f.String("listen", ":8080", "address to listen on")
-	f.String("log.level", "info", "log level (debug, info, warn, error)")
-	f.String("tracing.exporter", "none", "trace exporter: none, otlp (OTLP over HTTP, configured by OTEL_* variables) or console")
-
-	f.String("webhook.token", "", "bearer token Alertmanager must send (required)")
-	f.String("webhook.tokenfile", "", "file containing webhook.token")
 
 	f.String("autotask.username", "", "Autotask API user name (required)")
 	f.String("autotask.usernamefile", "", "file containing autotask.username")
@@ -71,6 +69,17 @@ func AddFlags(f *pflag.FlagSet) {
 	f.String("autotask.integrationcode", "", "Autotask API tracking identifier (required)")
 	f.String("autotask.integrationcodefile", "", "file containing autotask.integrationcode")
 	f.String("autotask.zoneurl", autotask.DefaultZoneInformationURL, "Autotask zone information URL")
+}
+
+// AddFlags adds a command line flag for every setting to f.
+func AddFlags(f *pflag.FlagSet) {
+	AddAutotaskFlags(f)
+	f.String("listen", ":8080", "address to listen on")
+	f.String("log.level", "info", "log level (debug, info, warn, error)")
+	f.String("tracing.exporter", "none", "trace exporter: none, otlp (OTLP over HTTP, configured by OTEL_* variables) or console")
+
+	f.String("webhook.token", "", "bearer token Alertmanager must send (required)")
+	f.String("webhook.tokenfile", "", "file containing webhook.token")
 
 	f.Int64("company.catchall", 0, "ID of the catch-all company (required)")
 	f.String("company.udf", "Alertmanager Selectors", "name of the Company UDF holding company selectors")
@@ -104,18 +113,7 @@ func FromFlags(f *pflag.FlagSet) (Config, error) {
 		return Config{}, err
 	}
 
-	var errs []error
-	values := map[string]string{}
-	for _, key := range secrets {
-		v, err := secret(k, key)
-		switch {
-		case err != nil:
-			errs = append(errs, err)
-		case v == "":
-			errs = append(errs, fmt.Errorf("%s (or %sfile) is required", key, key))
-		}
-		values[key] = v
-	}
+	values, errs := requiredSecrets(k, secrets)
 
 	var level slog.Level
 	if err := level.UnmarshalText([]byte(k.String("log.level"))); err != nil {
@@ -186,6 +184,45 @@ func FromFlags(f *pflag.FlagSet) (Config, error) {
 		return Config{}, fmt.Errorf("invalid configuration:\n%w", err)
 	}
 	return cfg, nil
+}
+
+// AutotaskFromFlags loads only the Autotask API settings from f, which holds
+// the flags added by [AddAutotaskFlags] already parsed, in the same way as
+// [FromFlags]. Other settings in the configuration file are ignored.
+func AutotaskFromFlags(f *pflag.FlagSet) (Autotask, error) {
+	k, err := configger.LoadConfig(f, configger.WithEnvPrefix(EnvPrefix))
+	if err != nil {
+		return Autotask{}, err
+	}
+
+	values, errs := requiredSecrets(k, autotaskSecrets)
+	if err := errors.Join(errs...); err != nil {
+		return Autotask{}, fmt.Errorf("invalid configuration:\n%w", err)
+	}
+	return Autotask{
+		Username:        values["autotask.username"],
+		Secret:          values["autotask.secret"],
+		IntegrationCode: values["autotask.integrationcode"],
+		ZoneURL:         k.String("autotask.zoneurl"),
+	}, nil
+}
+
+// requiredSecrets returns the value of each key, with an error for each that
+// is unset or can't be read.
+func requiredSecrets(k configger.Config, keys []string) (map[string]string, []error) {
+	var errs []error
+	values := map[string]string{}
+	for _, key := range keys {
+		v, err := secret(k, key)
+		switch {
+		case err != nil:
+			errs = append(errs, err)
+		case v == "":
+			errs = append(errs, fmt.Errorf("%s (or %sfile) is required", key, key))
+		}
+		values[key] = v
+	}
+	return values, errs
 }
 
 // secret returns the value of key, read from the file named by "<key>file"

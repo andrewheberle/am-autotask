@@ -288,3 +288,78 @@ func TestTracingExporter(t *testing.T) {
 		t.Errorf("err = %v, want one naming tracing.exporter", err)
 	}
 }
+
+func TestAutotaskFromFlags(t *testing.T) {
+	loadAutotask := func(args ...string) (config.Autotask, error) {
+		f := pflag.NewFlagSet("lookup", pflag.ContinueOnError)
+		config.AddAutotaskFlags(f)
+		if err := f.Parse(args); err != nil {
+			return config.Autotask{}, err
+		}
+		return config.AutotaskFromFlags(f)
+	}
+	want := config.Autotask{Username: "api@example.com", Secret: "s3cret", IntegrationCode: "CODE", ZoneURL: autotask.DefaultZoneInformationURL}
+
+	tests := []struct {
+		name    string
+		env     map[string]string
+		args    func(t *testing.T) []string
+		want    config.Autotask
+		wantErr []string
+	}{
+		{
+			name: "receiver configuration file, ignoring other settings",
+			args: func(t *testing.T) []string {
+				return []string{"--config", writeFile(t, "c.yaml", minimalYAML+"  queue: 8\n")}
+			},
+			want: want,
+		},
+		{
+			name: "only Autotask settings are required",
+			args: func(t *testing.T) []string {
+				return []string{"--config", writeFile(t, "c.yaml", "autotask:\n  username: api@example.com\n  secret: s3cret\n  integrationcode: CODE\n")}
+			},
+			want: want,
+		},
+		{
+			name: "environment variables and secret files",
+			env:  map[string]string{"AM_AUTOTASK_AUTOTASK_USERNAME": "api@example.com", "AM_AUTOTASK_AUTOTASK_INTEGRATIONCODE": "CODE"},
+			args: func(t *testing.T) []string {
+				return []string{"--autotask.secretfile", writeFile(t, "secret", "s3cret\n"), "--autotask.zoneurl", "http://zone"}
+			},
+			want: config.Autotask{Username: "api@example.com", Secret: "s3cret", IntegrationCode: "CODE", ZoneURL: "http://zone"},
+		},
+		{
+			name:    "missing settings are all reported",
+			args:    func(*testing.T) []string { return nil },
+			wantErr: []string{"autotask.username", "autotask.secret", "autotask.integrationcode"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+
+			got, err := loadAutotask(tt.args(t)...)
+
+			if tt.wantErr != nil {
+				if err == nil {
+					t.Fatal("expected an error")
+				}
+				for _, key := range tt.wantErr {
+					if !strings.Contains(err.Error(), key) {
+						t.Errorf("error should mention %s: %v", key, err)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Errorf("got %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}

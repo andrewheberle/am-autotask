@@ -3,6 +3,7 @@ package autotask_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/andrewheberle/am-autotask/internal/autotask"
+	"github.com/andrewheberle/am-autotask/internal/lookup"
 	"github.com/andrewheberle/am-autotask/internal/receiver"
 	"github.com/andrewheberle/am-autotask/internal/selector"
 )
@@ -420,5 +422,70 @@ func TestOpenAlertTicketsReturnsOpenTicketsOfEveryAlertGroup(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("OpenAlertTickets =\n%+v\nwant\n%+v", got, want)
+	}
+}
+
+func TestPicklists(t *testing.T) {
+	f := newFakeServer(t)
+	sub := pv(34, "Laptop", true)
+	sub["parentValue"] = "12"
+	f.fields["Tickets"] = []entity{
+		{"name": "title", "isPickList": false},
+		picklist("issueType", pv(12, "Hardware", true), pv(13, "Retired", false)),
+		picklist("subIssueType", sub),
+	}
+	c := newClient(t, f)
+
+	got, err := c.Picklists(ctx, "Tickets")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[string][]lookup.PicklistValue{
+		"issueType":    {{ID: 12, Label: "Hardware", Active: true}, {ID: 13, Label: "Retired"}},
+		"subIssueType": {{ID: 34, Label: "Laptop", Active: true, ParentID: 12}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Picklists = %+v, want %+v", got, want)
+	}
+}
+
+func TestSearchCompanies(t *testing.T) {
+	tests := []struct {
+		name            string
+		search          string
+		includeInactive bool
+		want            []int64
+	}{
+		{"active companies containing the name, ignoring case", "group", false, []int64{1, 3}},
+		{"including inactive companies", "group", true, []int64{1, 2, 3}},
+		{"no match", "nothing", true, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFakeServer(t)
+			f.pageSize = 1
+			f.add("Companies", entity{"id": 1, "companyName": "R-Group International", "isActive": true})
+			f.add("Companies", entity{"id": 2, "companyName": "Old Group", "isActive": false})
+			f.add("Companies", entity{"id": 3, "companyName": "GROUP Two", "isActive": true})
+			f.add("Companies", entity{"id": 4, "companyName": "Other", "isActive": true})
+			c := newClient(t, f)
+
+			got, err := c.SearchCompanies(ctx, tt.search, tt.includeInactive)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var ids []int64
+			for _, company := range got {
+				ids = append(ids, company.ID)
+				if company.Name == "" {
+					t.Errorf("company %d has no name", company.ID)
+				}
+			}
+			if !slices.Equal(ids, tt.want) {
+				t.Errorf("IDs = %v, want %v", ids, tt.want)
+			}
+		})
 	}
 }
