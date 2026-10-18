@@ -53,6 +53,24 @@ sboms:
   - artifacts: binary
     disable: false
 
+archives:
+  - ids:
+      - am-autotask
+    allow_different_binary_count: true
+    formats: [tar.gz]
+    # this name template makes the OS and Arch compatible with the results of `uname`.
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    # use zip for windows archives
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
 dockers_v2:
   - images:
       - "ghcr.io/andrewheberle/am-autotask"
