@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/andrewheberle/am-autotask/compare/v0.9.0...v0.10.0) (2026-10-19)
+
+
+### Features
+
+* run multiple replicas in Kubernetes with leader election ([#38](https://github.com/andrewheberle/am-autotask/issues/38)) ([da71569](https://github.com/andrewheberle/am-autotask/commit/da715698b2fc586b9b5a12f4103503982b835454))
+
 ## [0.9.0](https://github.com/andrewheberle/am-autotask/compare/v0.8.0...v0.9.0) (2026-10-19)
 
 
