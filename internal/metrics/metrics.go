@@ -13,6 +13,7 @@ import (
 
 	"github.com/andrewheberle/am-autotask/internal/autotask"
 	"github.com/andrewheberle/am-autotask/internal/receiver"
+	"github.com/andrewheberle/am-autotask/internal/server"
 )
 
 const namespace = "am_autotask"
@@ -32,6 +33,8 @@ type Metrics struct {
 	templates      *prometheus.CounterVec
 	recurrences    *prometheus.CounterVec
 	duration       *prometheus.HistogramVec
+	transitions    prometheus.Counter
+	forwarded      *prometheus.CounterVec
 }
 
 var _ receiver.Observer = (*Metrics)(nil)
@@ -45,10 +48,16 @@ type Options struct {
 	SelectorCounts func() (valid, invalid int)
 	// Ready reports whether startup has completed.
 	Ready func() bool
+	// Leader reports whether this replica handles notifications itself.
+	// Default Ready, as a single instance is always its own leader.
+	Leader func() bool
 }
 
 // New registers the collectors.
 func New(opts Options) *Metrics {
+	if opts.Leader == nil {
+		opts.Leader = opts.Ready
+	}
 	m := &Metrics{
 		registry: prometheus.NewRegistry(),
 		notifications: prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -100,6 +109,14 @@ func New(opts Options) *Metrics {
 			Help:    "Duration of Autotask API operations made while handling notifications, including paging, by operation.",
 			Buckets: prometheus.ExponentialBuckets(0.1, 2, 10),
 		}, []string{"operation"}),
+		transitions: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: namespace, Name: "leader_transitions_total",
+			Help: "Times this replica became or stopped being the leader, with leader election.",
+		}),
+		forwarded: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace, Name: "forwarded_notifications_total",
+			Help: "Notifications this standby forwarded to the leader, by result (delivered, leader_error, no_leader, unreachable).",
+		}, []string{"result"}),
 	}
 
 	// start the known label values at zero so rates work from the first scrape
@@ -115,6 +132,9 @@ func New(opts Options) *Metrics {
 	for _, outcome := range []string{receiver.RecurrenceFollowed, receiver.RecurrenceRaised, receiver.RecurrenceFailed} {
 		m.recurrences.WithLabelValues(outcome)
 	}
+	for _, result := range server.ForwardResults {
+		m.forwarded.WithLabelValues(result)
+	}
 
 	selectorCount := func(state string, pick func(valid, invalid int) int) prometheus.Collector {
 		return prometheus.NewGaugeFunc(prometheus.GaugeOpts{
@@ -126,7 +146,7 @@ func New(opts Options) *Metrics {
 
 	m.registry.MustRegister(
 		m.notifications, m.ticketsCreated, m.notesCreated, m.autotaskErrors, m.alertsMoved, m.orphansDone,
-		m.catchAll, m.priorities, m.overrides, m.templates, m.recurrences, m.duration,
+		m.catchAll, m.priorities, m.overrides, m.templates, m.recurrences, m.duration, m.transitions, m.forwarded,
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: namespace, Name: "company_selectors_age_seconds",
 			Help: "Seconds since company selectors were last loaded from Autotask.",
@@ -138,6 +158,15 @@ func New(opts Options) *Metrics {
 			Help: "1 once startup has completed and notifications are being handled, otherwise 0.",
 		}, func() float64 {
 			if opts.Ready() {
+				return 1
+			}
+			return 0
+		}),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: namespace, Name: "leader",
+			Help: "1 while this replica handles notifications itself: it holds the leader election lease or, without leader election, is ready. Otherwise 0.",
+		}, func() float64 {
+			if opts.Leader() {
 				return 1
 			}
 			return 0
@@ -187,6 +216,16 @@ func (m *Metrics) TemplateFailed(template string) {
 // Recurrence implements [receiver.Observer].
 func (m *Metrics) Recurrence(outcome string) {
 	m.recurrences.WithLabelValues(outcome).Inc()
+}
+
+// LeaderChanged counts this replica becoming or stopping being the leader.
+func (m *Metrics) LeaderChanged(bool) {
+	m.transitions.Inc()
+}
+
+// ObserveForward counts a notification forwarded to the leader by result.
+func (m *Metrics) ObserveForward(result string) {
+	m.forwarded.WithLabelValues(result).Inc()
 }
 
 // ObserveNotification counts a webhook request by result.

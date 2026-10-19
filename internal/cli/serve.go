@@ -15,10 +15,12 @@ import (
 	"github.com/andrewheberle/simplecommand"
 	"github.com/bep/simplecobra"
 	"github.com/spf13/cobra"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 
 	"github.com/andrewheberle/am-autotask/internal/autotask"
 	"github.com/andrewheberle/am-autotask/internal/config"
+	"github.com/andrewheberle/am-autotask/internal/leader"
 	"github.com/andrewheberle/am-autotask/internal/metrics"
 	"github.com/andrewheberle/am-autotask/internal/receiver"
 	"github.com/andrewheberle/am-autotask/internal/selector"
@@ -114,9 +116,21 @@ func (c *serveCommand) serve(ctx context.Context, cfg config.Config, logger *slo
 
 	g := &gate{}
 
+	// m is set before the elector runs, which is when OnChange is called
+	var m *metrics.Metrics
+	el, err := newElector(cfg.LeaderElection, logger, func(leader bool) { m.LeaderChanged(leader) })
+	if err != nil {
+		return err
+	}
+	ready, leading := g.ready, g.ready
+	if el != nil {
+		ready = func() bool { return g.ready() && el.Healthy() }
+		leading = el.Leading
+	}
+
 	// read by metrics scrapes, which may happen before the cache exists
 	var cachePtr atomic.Pointer[selector.Cache]
-	m := metrics.New(metrics.Options{
+	m = metrics.New(metrics.Options{
 		SelectorsAge: func() time.Duration {
 			if c := cachePtr.Load(); c != nil {
 				return c.Age()
@@ -129,21 +143,34 @@ func (c *serveCommand) serve(ctx context.Context, cfg config.Config, logger *slo
 			}
 			return 0, 0
 		},
-		Ready: g.ready,
+		Ready:  ready,
+		Leader: leading,
 	})
 
-	srv := &http.Server{
-		Addr: cfg.Listen,
-		Handler: server.New(g, server.Options{
-			Token:   cfg.WebhookToken,
-			Ready:   g.ready,
-			Metrics: m.Handler(),
-			Observe: m.ObserveNotification,
-			Logger:  logger,
+	serverOpts := server.Options{
+		Token:   cfg.WebhookToken,
+		Ready:   ready,
+		Metrics: m.Handler(),
+		Observe: m.ObserveNotification,
+		Logger:  logger,
 
-			TracerProvider: tp.TracerProvider,
-			Propagators:    tp.Propagators,
-		}),
+		TracerProvider: tp.TracerProvider,
+		Propagators:    tp.Propagators,
+	}
+	if el != nil {
+		serverOpts.Leadership = el
+		serverOpts.ObserveForward = m.ObserveForward
+		serverOpts.ForwardClient = &http.Client{
+			Timeout: 60 * time.Second,
+			Transport: otelhttp.NewTransport(http.DefaultTransport,
+				otelhttp.WithTracerProvider(tp.TracerProvider),
+				otelhttp.WithPropagators(tp.Propagators),
+			),
+		}
+	}
+	srv := &http.Server{
+		Addr:              cfg.Listen,
+		Handler:           server.New(g, serverOpts),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	serveErr := make(chan error, 1)
@@ -200,8 +227,25 @@ func (c *serveCommand) serve(ctx context.Context, cfg config.Config, logger *slo
 	g.receiver.Store(r)
 	logger.Info("ready")
 
+	// the elector outlives ctx, so the lease is held until in-flight
+	// notifications have drained and only then released
+	stopElector := func() {}
+	if el != nil {
+		elCtx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			el.Run(elCtx)
+			close(done)
+		}()
+		stopElector = func() {
+			cancel()
+			<-done
+		}
+	}
+
 	select {
 	case err := <-serveErr:
+		stopElector()
 		return err
 	case <-ctx.Done():
 	}
@@ -210,8 +254,38 @@ func (c *serveCommand) serve(ctx context.Context, cfg config.Config, logger *slo
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	err = srv.Shutdown(shutdownCtx)
+	stopElector()
 	flushed = true
 	return errors.Join(err, tp.Shutdown(shutdownCtx))
+}
+
+// newElector returns the leader elector, or nil without leader election. It
+// fails unless running in a Kubernetes pod.
+func newElector(cfg config.LeaderElection, logger *slog.Logger, onChange func(bool)) (*leader.Elector, error) {
+	if !cfg.Enabled {
+		return nil, nil
+	}
+
+	in := leader.InCluster{}
+	namespace := cfg.Namespace
+	if namespace == "" {
+		var err error
+		if namespace, err = in.Namespace(); err != nil {
+			return nil, fmt.Errorf("leader election: %w", err)
+		}
+	}
+	client, err := in.Client(namespace, cfg.Lease)
+	if err != nil {
+		return nil, fmt.Errorf("leader election: %w", err)
+	}
+
+	logger.Info("leader election enabled", "namespace", namespace, "lease", cfg.Lease, "identity", cfg.Identity, "address", cfg.Address)
+	return leader.New(client, leader.Options{
+		Identity: cfg.Identity,
+		Address:  cfg.Address,
+		OnChange: onChange,
+		Logger:   logger,
+	})
 }
 
 // priorityLabels names each ticket priority ID, for notes about priority

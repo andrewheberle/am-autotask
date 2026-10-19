@@ -19,7 +19,7 @@ All am-autotask metrics are prefixed `am_autotask_`. The standard Go runtime (`g
 
 | Metric | Type | Labels | Meaning |
 | --- | --- | --- | --- |
-| `am_autotask_notifications_total` | counter | `result` | Webhook requests by result: `handled`, `unauthorized` (missing or wrong bearer token), `invalid` (malformed or unsupported webhook version), `temporary_failure` (answered 500 so Alertmanager retries, including while still starting up) and `permanent_failure` (acknowledged without reaching Autotask). |
+| `am_autotask_notifications_total` | counter | `result` | Webhook requests by result: `handled`, `unauthorized` (missing or wrong bearer token), `invalid` (malformed or unsupported webhook version), `temporary_failure` (answered 500 so Alertmanager retries, including while still starting up, or 503 to a forwarded notification after leadership moved) and `permanent_failure` (acknowledged without reaching Autotask). With [leader election](../README.md#multiple-replicas), notifications a standby forwards are counted by the leader, not the standby. |
 | `am_autotask_tickets_created_total` | counter | | Autotask tickets created, including problem tickets. |
 | `am_autotask_notes_created_total` | counter | | Ticket notes created, including notes on duplicate and orphaned tickets. |
 | `am_autotask_autotask_errors_total` | counter | `operation`, `kind` | Failed Autotask requests made while handling notifications. `operation` is one of `open_tickets`, `previous_ticket`, `get_ticket`, `open_alert_tickets`, `create_ticket`, `create_note` or `update_ticket`; `kind` is `temporary`, `permanent` or `rate_limited` (HTTP 429). Company selector reloads are not counted here; see `am_autotask_company_selectors_age_seconds`. |
@@ -32,7 +32,10 @@ All am-autotask metrics are prefixed `am_autotask_`. The standard Go runtime (`g
 | `am_autotask_ticket_priority_overrides_total` | counter | | Tickets found with a priority a person changed, which then no longer follows severity. Counted once per ticket. A high rate compared with `am_autotask_ticket_priority_changes_total` suggests `ticket.priorities` or `ticket.severityorder` doesn't match how the service desk prioritises. |
 | `am_autotask_template_errors_total` | counter | `template` | [Ticket templates](../README.md#ticket-templates) from the templates file that failed on a notification, so the built-in wording was used instead: `ticket.title`, `ticket.description`, `note.title`, `note.description`, `problem.title` or `problem.description`. Always zero without a templates file. |
 | `am_autotask_recurrences_total` | counter | `outcome` | [Recurrences](../README.md#recurrences): tickets raised soon after their alert group's previous ticket was completed, by outcome: `followed` (linked to the previous ticket's open problem ticket), `raised` (a new problem ticket was raised) or `failed` (left for a person to link; see [AmAutotaskRecurrenceLinkFailed](#amautotaskrecurrencelinkfailed)). Always zero unless `problem.lookback` is set. |
-| `am_autotask_ready` | gauge | | `1` once startup has completed and notifications are being handled, otherwise `0`. |
+| `am_autotask_ready` | gauge | | `1` once startup has completed and notifications are being handled, otherwise `0`. With [leader election](../README.md#multiple-replicas), standbys are ready too, as they forward notifications to the leader, and a replica that cannot reach the Kubernetes API is not ready. |
+| `am_autotask_leader` | gauge | | `1` while this replica handles notifications itself, otherwise `0`. With leader election that is while it holds the Lease; without, a ready instance is its own leader. Summed over replicas it should be `1`. |
+| `am_autotask_leader_transitions_total` | counter | | Times this replica became or stopped being the leader. Always zero without leader election. |
+| `am_autotask_forwarded_notifications_total` | counter | `result` | Notifications this standby forwarded to the leader, by result: `delivered` (the leader handled it), `leader_error` (the leader answered with an error, passed back to Alertmanager), `no_leader` (no replica held the Lease, so answered 503) or `unreachable` (answered 502). Always zero without leader election. |
 | `am_autotask_autotask_request_duration_seconds` | histogram | `operation` | Duration of Autotask operations made while handling notifications, with the same `operation` values as `am_autotask_autotask_errors_total`. An operation includes all of its pages and any read back, such as `create_ticket` reading the new ticket's number. |
 
 ### Useful queries
@@ -65,6 +68,13 @@ increase(am_autotask_ticket_priority_overrides_total[1d])
 # recurrences per day, by outcome
 sum by (outcome) (increase(am_autotask_recurrences_total[1d]))
 
+# which replica is the leader, and how often leadership moves
+am_autotask_leader == 1
+sum(increase(am_autotask_leader_transitions_total[1d]))
+
+# notifications forwarded to the leader per second, by result
+sum by (result) (rate(am_autotask_forwarded_notifications_total[5m]))
+
 # deliveries Alertmanager could not make to webhook receivers, including am-autotask
 sum(rate(alertmanager_notifications_failed_total{integration="webhook"}[5m]))
 ```
@@ -79,8 +89,8 @@ sum(rate(alertmanager_notifications_failed_total{integration="webhook"}[5m]))
 
 Its rows are:
 
-- **Status**: am-autotask's own firing and pending alerts from the [alerting rules](#alerting-rules), readiness, the age of the company selectors and how many companies' selectors are valid. The alert list needs Grafana to read the rules from the data source, which it does for Prometheus and Mimir.
-- **Notifications**: notifications by result, the share failing, and Alertmanager's failed webhook deliveries. Like the query above, the last counts every webhook receiver.
+- **Status**: am-autotask's own firing and pending alerts from the [alerting rules](#alerting-rules), readiness, which replica is the leader, the age of the company selectors and how many companies' selectors are valid. The alert list needs Grafana to read the rules from the data source, which it does for Prometheus and Mimir.
+- **Notifications**: notifications by result, the share failing, Alertmanager's failed webhook deliveries, and notifications standbys forwarded to the leader. Like the query above, Alertmanager's failures count every webhook receiver.
 - **Autotask**: request duration and errors by operation.
 - **Tickets** (collapsed): tickets and notes created, catch-all tickets, priority changes compared with overrides, orphaned tickets, recurrences by outcome, and ticket templates that failed. These don't need anyone to act on them straight away; use them to tune company selectors and `ticket.priorities`.
 
@@ -128,6 +138,7 @@ The [alerting rules workflow](../.github/workflows/rules.yml) runs these checks 
 | [AmAutotaskRestarting](#amautotaskrestarting) | warning | am-autotask restarted more than three times in an hour. |
 | [AmAutotaskAlertsMoved](#amautotaskalertsmoved) | info | Alerts moved off orphaned tickets in the last hour. |
 | [AmAutotaskNotReady](#amautotasknotready) | warning | am-autotask has been running for 10 minutes without becoming ready. |
+| [AmAutotaskNoLeader](#amautotasknoleader) | critical | No replica has been handling notifications for 2 minutes. |
 | [AmAutotaskSlowAutotask](#amautotaskslowautotask) | warning | The 95th percentile Autotask request has taken over 5 seconds for 15 minutes. |
 | [AmAutotaskAmbiguousCompanyMatch](#amautotaskambiguouscompanymatch) | warning | An alert group matched more than one company in the last hour. |
 | [AmAutotaskUnmatchedAlertGroups](#amautotaskunmatchedalertgroups) | info | An alert group matched no company in the last hour. |
@@ -234,6 +245,16 @@ am-autotask is running but has not finished starting, so it answers every notifi
 
 - Check am-autotask's logs for the last startup step reached.
 - Check Autotask, and the zone information URL, are reachable from am-autotask.
+- With [leader election](../README.md#multiple-replicas), a replica is also not ready while it cannot reach the Kubernetes API to read the Lease. Search its logs for `leader election lease request failed`; a `forbidden` error means the Role allowing it to get, create and update Leases is missing.
+
+### AmAutotaskNoLeader
+
+No replica is handling notifications, so they are answered with errors and Alertmanager's retries are not becoming tickets.
+
+- Without leader election this means the only instance is up but not ready; see [AmAutotaskNotReady](#amautotasknotready).
+- With leader election, check the Lease: `kubectl -n <namespace> get lease am-autotask -o yaml`. Its `holderIdentity` is the leader's pod, and `renewTime` should be within the last few seconds.
+- Search the replicas' logs for `leader election lease request failed` and `could not renew the leader election lease in time`. Every replica needs to reach the Kubernetes API; a `forbidden` error means the Role allowing it to get, create and update Leases is missing.
+- A replica only campaigns once it is ready, so if [AmAutotaskNotReady](#amautotasknotready) is also firing, start there.
 
 ### AmAutotaskSlowAutotask
 

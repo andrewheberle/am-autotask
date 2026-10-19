@@ -132,6 +132,18 @@ groups:
           description: '{{ $labels.instance }} has been running for 10 minutes without becoming ready, so it is answering notifications with errors.'
           runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotasknotready
 
+      - alert: AmAutotaskNoLeader
+        # Without leader election a ready instance is its own leader, so this
+        # also fires when the only instance is up but not ready.
+        expr: sum by (job) (am_autotask_leader{job="am-autotask"}) < 1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: No am-autotask replica is handling notifications
+          description: No am-autotask replica has been the leader for 2 minutes, so notifications are being answered with errors and are not becoming Autotask tickets.
+          runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotasknoleader
+
       - alert: AmAutotaskSlowAutotask
         expr: |
           histogram_quantile(0.95, sum by (instance, le) (rate(am_autotask_autotask_request_duration_seconds_bucket{job="am-autotask"}[10m]))) > 5

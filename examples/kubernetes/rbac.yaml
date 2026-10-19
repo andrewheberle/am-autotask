@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: am-autotask
+  labels:
+    app.kubernetes.io/name: am-autotask
+---
+# Leader election: replicas campaign for the am-autotask Lease
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: am-autotask
+  labels:
+    app.kubernetes.io/name: am-autotask
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["create"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    resourceNames: ["am-autotask"]
+    verbs: ["get", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: am-autotask
+  labels:
+    app.kubernetes.io/name: am-autotask
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: am-autotask
+subjects:
+  - kind: ServiceAccount
+    name: am-autotask

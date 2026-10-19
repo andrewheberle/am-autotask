@@ -1,6 +1,6 @@
 # Kubernetes example
 
-Runs am-autotask as a Deployment in the `monitoring` namespace, with its settings in a ConfigMap generated from [config.yaml](config.yaml) and its secrets in a Secret mounted as files.
+Runs am-autotask as a Deployment of two replicas in the `monitoring` namespace, with its settings in a ConfigMap generated from [config.yaml](config.yaml) and its secrets in a Secret mounted as files.
 
 Complete the [Autotask setup](../../README.md#autotask-setup) first.
 
@@ -27,7 +27,7 @@ Complete the [Autotask setup](../../README.md#autotask-setup) first.
    kubectl apply -k examples/kubernetes
    ```
 
-The pod becomes ready once it has reached Autotask, validated its configuration and loaded company selectors. If the configuration does not match Autotask it exits, and its logs say why.
+Each pod becomes ready once it has reached Autotask, validated its configuration, loaded company selectors and read the Lease. If the configuration does not match Autotask it exits, and its logs say why.
 
 ## Alertmanager
 
@@ -62,6 +62,8 @@ Kustomize can't generate it from [kustomization.yaml](kustomization.yaml), becau
 
 ## Notes
 
-- **One replica, recreated on rollout.** am-autotask runs as a single instance, so the Deployment uses the `Recreate` strategy and never runs two pods at once.
+- **Two replicas with leader election.** One pod, the leader, handles notifications and the other forwards them to it; see [Multiple replicas](../../README.md#multiple-replicas). [rbac.yaml](rbac.yaml) lets the pods' service account manage the `am-autotask` Lease, the pod IP reaches `leaderelection.address` through the downward API, and [pdb.yaml](pdb.yaml) keeps one pod running through voluntary disruptions. Check which pod leads with `kubectl -n monitoring get lease am-autotask`.
+- **Rolling updates.** Each new pod starts before an old one stops, and the leader releases the Lease on shutdown, so a standby takes over at once.
+- **One replica instead.** To run a single pod, set `replicas: 1`, remove the `AM_AUTOTASK_LEADERELECTION_*` variables and use the `Recreate` strategy, as without leader election two pods must never run at once.
 - **Probes.** The startup and readiness probes use `/readyz` and the liveness probe uses `/healthz`. The startup probe allows two minutes to reach Autotask and load company selectors.
 - **Locked down.** The pod runs as the image's non-root user with a read-only root filesystem and no capabilities.

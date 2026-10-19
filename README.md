@@ -170,7 +170,7 @@ A company's selector UDF holds one [Alertmanager label selector](https://prometh
 
 Only the notification's **group labels** are matched, so any label used in a selector must be in the Alertmanager route's `group_by`. This guarantees every alert in a group agrees on the routing labels, and a group can't change company as alerts join or leave it. The company is chosen once, when the ticket is created.
 
-Selectors are loaded from Autotask at startup and every `company.refresh` (default 15 minutes). When a group matches no company, they're also reloaded straight away, at most once per `company.missrefresh` (default one minute), so a company tagged a moment ago is picked up. A company whose selectors don't parse is logged and skipped; the rest still load. If a reload fails, the previous selectors stay in use.
+Selectors are loaded from Autotask at startup and about every `company.refresh` (default 15 minutes), varied by up to 10% so that replicas started together don't reload together. When a group matches no company, they're also reloaded straight away, at most once per `company.missrefresh` (default one minute), so a company tagged a moment ago is picked up. A company whose selectors don't parse is logged and skipped; the rest still load. If a reload fails, the previous selectors stay in use.
 
 ## Alertmanager configuration
 
@@ -229,7 +229,7 @@ Each secret can be given directly or as a path to a file containing it, which su
 | `autotask.zoneurl` | Autotask's zone information URL | The API zone for the user is discovered here at startup. |
 | `company.catchall` | | ID of the catch-all company. Required; `0` is your own company. |
 | `company.udf` | `Alertmanager Selectors` | Name of the Company UDF holding company selectors. |
-| `company.refresh` | `15m` | How often company selectors are reloaded. |
+| `company.refresh` | `15m` | How often company selectors are reloaded. Each reload is varied by up to 10%, and the first comes after a random part of the interval. |
 | `company.missrefresh` | `1m` | Minimum time between reloads triggered by a group matching no company. |
 | `ticket.udf` | `Alertmanager Recorded Alerts` | Name of the Ticket UDF holding recorded alerts. |
 | `ticket.priorities` | | Map of severity to priority ID, e.g. `critical: 4`. As a flag or environment variable: `critical=4,warning=2`. |
@@ -253,6 +253,11 @@ Each secret can be given directly or as a path to a file containing it, which su
 | `note.type` | `1` (*Task Summary*) | Note type ID of ticket notes. |
 | `note.publish` | `2` (*Internal Project Team*) | Publish (visibility) ID of ticket notes. |
 | `templates` | | Path to a file of [ticket templates](#ticket-templates). Optional; the built-in wording applies when unset. |
+| `leaderelection.enabled` | `false` | Run as one of several replicas in Kubernetes. See [Multiple replicas](#multiple-replicas). |
+| `leaderelection.address` | | Address other replicas forward notifications to while this one leads, as `host:port`: the pod IP and the `listen` port. Required with `leaderelection.enabled`. |
+| `leaderelection.lease` | `am-autotask` | Name of the Lease. |
+| `leaderelection.namespace` | the pod's namespace | Namespace of the Lease. |
+| `leaderelection.identity` | the host name | Name of this replica on the Lease. In Kubernetes the host name is the pod name. |
 
 The defaults for status, type, source, note type and publish are Autotask system values, so they exist on every instance. Priorities, queues, issue types, categories and work types differ between instances, so they have no defaults.
 
@@ -379,18 +384,34 @@ docker run -v ./config.yaml:/etc/am-autotask/config.yaml \
 - [Kubernetes](examples/kubernetes/): a Deployment, Service and optional ServiceMonitor, applied with Kustomize.
 - [Grafana dashboard](examples/grafana/am-autotask.json): notifications, Autotask requests and tickets at a glance. See [Monitoring](docs/monitoring.md#dashboard).
 
+### Multiple replicas
+
+In Kubernetes, am-autotask can run as several replicas so that a pod failing, or a rollout, doesn't stop alerts becoming tickets. One replica, the leader, handles every notification; the others are standbys. Any replica can receive a notification from the Service, and a standby forwards it to the leader. The leader is chosen with a Kubernetes [Lease](https://kubernetes.io/docs/concepts/architecture/leases/), so nothing besides Autotask and the Kubernetes API is needed (see [ADR-0007](docs/adr/0007-replicas-elect-a-leader-through-a-kubernetes-lease.md)).
+
+- Set `leaderelection.enabled` and `leaderelection.address`, the pod IP and listen port, which the [Kubernetes example](examples/kubernetes/) does with the downward API.
+- The pod's service account needs a Role allowing it to `get`, `create` and `update` Leases in its namespace.
+- am-autotask refuses to start with leader election enabled outside a Kubernetes pod.
+- Every replica connects to Autotask, validates its configuration and loads company selectors before it is ready or campaigns for the Lease, so a standby can take over at once.
+- The leader renews the Lease every 2 seconds. If it cannot for 10 seconds it stops handling notifications, cancelling any in progress so Alertmanager retries them, and becomes a standby. Standbys take over once the Lease has gone unrenewed for 15 seconds.
+- On shutdown the leader finishes the notifications in progress, then releases the Lease so a standby takes over straight away.
+- While no replica leads, notifications are answered with `503` and Alertmanager retries them.
+- Standbys reload company selectors too, so each replica adds to Autotask's request count; see [Limitations](#limitations).
+
+Without `leaderelection.enabled` am-autotask runs as a single instance, as with Docker Compose. Don't run more than one instance without it: they would handle the same alert groups at once.
+
 ### Endpoints
 
 | Path | Description |
 | --- | --- |
 | `POST /webhook` | Alertmanager webhook receiver. Requires `Authorization: Bearer <webhook.token>`. |
 | `GET /healthz` | Always `200` while the process is running. |
-| `GET /readyz` | `200` once Autotask has been reached, configuration validated and company selectors loaded. Until then notifications are answered with `500`, so Alertmanager retries them. |
-| `GET /metrics` | Prometheus metrics, prefixed `am_autotask_`: notifications by result, tickets and notes created, alerts moved off orphaned tickets and orphaned tickets completed, tickets raised against the catch-all company, Autotask errors and request durations by operation, ticket templates that failed, recurrences by outcome, readiness, and the age and validity of the company selectors. See [Monitoring](docs/monitoring.md) for what they mean, ready-made alerting rules and a Grafana dashboard. |
+| `GET /readyz` | `200` once Autotask has been reached, configuration validated and company selectors loaded. Until then notifications are answered with `500`, so Alertmanager retries them. With leader election, `503` also while the Kubernetes API can't be reached. |
+| `GET /metrics` | Prometheus metrics, prefixed `am_autotask_`: notifications by result, tickets and notes created, alerts moved off orphaned tickets and orphaned tickets completed, tickets raised against the catch-all company, Autotask errors and request durations by operation, ticket templates that failed, recurrences by outcome, readiness, leadership and notifications forwarded to the leader, and the age and validity of the company selectors. See [Monitoring](docs/monitoring.md) for what they mean, ready-made alerting rules and a Grafana dashboard. |
 
 ## Limitations
 
-- The receiver runs as a single instance. Handling of each alert group is serialised in-process, behind an interface so a shared lock can be added to support replicas.
+- Only one instance handles notifications at a time. Handling of each alert group is serialised in-process, and [multiple replicas](#multiple-replicas) are supported in Kubernetes only, as standbys that forward to a leader rather than sharing the work.
+- Autotask cannot reject a write made from stale data, so a leader that stalls (for example a long pause or a network partition) just as another replica takes over may finish a notification it had already started. That can add a duplicate note, or lose one change to the recorded alerts so that the next notification's notes are off. Duplicate tickets are found and retired as below.
 - If more than one open ticket is ever found for a group, the oldest is used and each other one gets a note naming it and has its `externalID` changed to `am:dup:…` so it is warned only once. Merging is left to a person.
 - The Ticket UDF holds the fingerprints of about 450 alerts. Beyond that a group stops recording individual alerts: a note says so, further changes are not noted, and the group resolving still completes the ticket.
 - Orphaned tickets are only handed over for alerts that fire again under a new group key. A ticket is left open, and must be completed by hand, if its alerts resolve within `group_wait` of the configuration change, are removed from Alertmanager, or it had too many alerts to record them individually.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"sync"
 	"time"
 )
@@ -145,20 +146,31 @@ func (c *Cache) Age() time.Duration {
 	return c.opts.Now().Sub(c.loadedAt)
 }
 
-// Run refreshes the cache every interval until ctx is cancelled. Failures
-// are logged and the previous set kept.
+// Run refreshes the cache about every interval until ctx is cancelled.
+// Failures are logged and the previous set kept. The first refresh comes
+// after a random part of the interval and each later one varies by up to
+// 10%, so replicas started together don't keep refreshing together.
 func (c *Cache) Run(ctx context.Context, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
+	delay := firstDelay(interval, rand.Float64())
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-time.After(delay):
 			if err := c.Refresh(ctx); err != nil {
 				c.opts.Logger.WarnContext(ctx, "company selector refresh failed", "error", err)
 			}
 		}
+		delay = nextDelay(interval, rand.Float64())
 	}
+}
+
+// firstDelay is a random part of interval, given r in [0, 1).
+func firstDelay(interval time.Duration, r float64) time.Duration {
+	return time.Duration(float64(interval) * r)
+}
+
+// nextDelay is interval varied by up to 10% either way, given r in [0, 1).
+func nextDelay(interval time.Duration, r float64) time.Duration {
+	return time.Duration(float64(interval) * (0.9 + 0.2*r))
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -45,6 +46,21 @@ type Config struct {
 
 	// Receiver holds ticket and note settings; Now and Logger are unset.
 	Receiver receiver.Options
+
+	LeaderElection LeaderElection
+}
+
+// LeaderElection holds the settings for running several replicas in
+// Kubernetes, one of which handles notifications (ADR-0007).
+type LeaderElection struct {
+	Enabled bool
+	// Namespace of the Lease; empty means the pod's own namespace.
+	Namespace string
+	Lease     string
+	// Identity names this replica on the Lease.
+	Identity string
+	// Address is the host:port other replicas forward notifications to.
+	Address string
 }
 
 // Autotask holds the Autotask API settings.
@@ -115,6 +131,12 @@ func AddFlags(f *pflag.FlagSet) {
 	f.Int("note.publish", 2, "publish (visibility) ID of ticket notes")
 
 	f.String("templates", "", "path to a file of ticket templates overriding the built-in wording (optional)")
+
+	f.Bool("leaderelection.enabled", false, "run as one of several replicas in Kubernetes, handling notifications only while holding a Lease and otherwise forwarding them to the replica that does")
+	f.String("leaderelection.namespace", "", "namespace of the Lease; default the pod's own namespace")
+	f.String("leaderelection.lease", "am-autotask", "name of the Lease")
+	f.String("leaderelection.identity", "", "name of this replica on the Lease; default the host name, which is the pod name")
+	f.String("leaderelection.address", "", "host:port other replicas forward notifications to while this one leads, such as the pod IP and listen port (required with leaderelection.enabled)")
 }
 
 // AddTemplatesFlags adds the flags for the configuration file and the
@@ -170,6 +192,13 @@ func FromFlags(f *pflag.FlagSet) (Config, error) {
 		AppliedPriorityUDF:  k.String("ticket.appliedpriorityudf"),
 		Refresh:             k.Duration("company.refresh"),
 		MissRefresh:         k.Duration("company.missrefresh"),
+		LeaderElection: LeaderElection{
+			Enabled:   k.Bool("leaderelection.enabled"),
+			Namespace: k.String("leaderelection.namespace"),
+			Lease:     k.String("leaderelection.lease"),
+			Identity:  k.String("leaderelection.identity"),
+			Address:   k.String("leaderelection.address"),
+		},
 		Receiver: receiver.Options{
 			CatchAllCompanyID: k.Int64("company.catchall"),
 			SeverityLabel:     k.String("ticket.severitylabel"),
@@ -228,6 +257,7 @@ func FromFlags(f *pflag.FlagSet) (Config, error) {
 		}
 	}
 	errs = append(errs, severityOrderErrors(cfg.Receiver)...)
+	errs = append(errs, leaderElectionErrors(&cfg.LeaderElection)...)
 	switch cfg.TracingExporter {
 	case "none", "otlp", "console":
 	default:
@@ -266,6 +296,33 @@ func problemErrors(r receiver.Options) []error {
 		return []error{fmt.Errorf("problem.lookback requires ticket.type %d (Incident), not %d, as Autotask only links incidents to problem tickets", receiver.TicketTypeIncident, r.TicketType)}
 	}
 	return nil
+}
+
+// leaderElectionErrors checks the leader election settings, defaulting the
+// identity to the host name.
+func leaderElectionErrors(le *LeaderElection) []error {
+	if !le.Enabled {
+		return nil
+	}
+
+	var errs []error
+	if le.Identity == "" {
+		host, err := os.Hostname()
+		if err != nil {
+			errs = append(errs, fmt.Errorf("leaderelection.identity is unset and the host name can't be read: %w", err))
+		}
+		le.Identity = host
+	}
+	if le.Lease == "" {
+		errs = append(errs, errors.New("leaderelection.lease is required with leaderelection.enabled"))
+	}
+	switch host, port, err := net.SplitHostPort(le.Address); {
+	case le.Address == "":
+		errs = append(errs, errors.New("leaderelection.address is required with leaderelection.enabled"))
+	case err != nil || host == "" || port == "":
+		errs = append(errs, fmt.Errorf("leaderelection.address %q must be a host:port, such as the pod IP and listen port", le.Address))
+	}
+	return errs
 }
 
 // severityOrderErrors checks the severity order ranks exactly the severities
