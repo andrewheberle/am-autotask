@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/andrewheberle/am-autotask/compare/v0.7.0...v0.8.0) (2026-10-19)
+
+
+### Features
+
+* set the work type of new tickets ([#29](https://github.com/andrewheberle/am-autotask/issues/29)) ([5311d9f](https://github.com/andrewheberle/am-autotask/commit/5311d9f8124c58286862ee580c6231b8ec254cf8))
+
 ## [0.7.0](https://github.com/andrewheberle/am-autotask/compare/v0.6.0...v0.7.0) (2026-10-19)
 
 
