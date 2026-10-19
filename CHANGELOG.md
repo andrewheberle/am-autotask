@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.9.0](https://github.com/andrewheberle/am-autotask/compare/v0.8.0...v0.9.0) (2026-10-19)
+
+
+### Features
+
+* clearer default ticket titles, note titles and times ([#36](https://github.com/andrewheberle/am-autotask/issues/36)) ([9b7bd66](https://github.com/andrewheberle/am-autotask/commit/9b7bd664fc8a848aca598ee5cdea15fa41aa5532))
+* **examples:** add Grafana dashboard ([#33](https://github.com/andrewheberle/am-autotask/issues/33)) ([f1ad931](https://github.com/andrewheberle/am-autotask/commit/f1ad931a07ff5ca20aec035743296f6b99c58574))
+* let operators override ticket wording with Go templates ([#35](https://github.com/andrewheberle/am-autotask/issues/35)) ([66fd390](https://github.com/andrewheberle/am-autotask/commit/66fd3901ffc901721aae55870d3c1535cfeafd51))
+* link recurring tickets through Autotask problem tickets ([#37](https://github.com/andrewheberle/am-autotask/issues/37)) ([9532328](https://github.com/andrewheberle/am-autotask/commit/9532328f91102484d40578b04fa00139b8839921))
+
 ## [0.8.0](https://github.com/andrewheberle/am-autotask/compare/v0.7.0...v0.8.0) (2026-10-19)
 
 

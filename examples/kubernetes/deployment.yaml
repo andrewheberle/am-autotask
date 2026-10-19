@@ -29,7 +29,7 @@ spec:
       terminationGracePeriodSeconds: 35
       containers:
         - name: am-autotask
-          image: ghcr.io/andrewheberle/am-autotask:v0.8.0 # x-release-please-version
+          image: ghcr.io/andrewheberle/am-autotask:v0.9.0 # x-release-please-version
           args:
             - serve
             - --config=/etc/am-autotask/config.yaml
