@@ -102,6 +102,7 @@ func AddFlags(f *pflag.FlagSet) {
 	f.Int("ticket.issuetype", 0, "issue type ID of new tickets (optional)")
 	f.Int("ticket.subissuetype", 0, "sub-issue type ID of new tickets (optional)")
 	f.Int("ticket.category", 0, "ticket category ID of new tickets (optional)")
+	f.Int("ticket.worktype", 0, "work type (billing code) ID of new tickets (optional)")
 	f.Duration("ticket.duein", 0, "due date of new tickets relative to creation (optional)")
 	f.Int("ticket.resolvedstatus", 5, "status ID set when the whole alert group resolves; 0 leaves the status unchanged")
 
@@ -155,6 +156,7 @@ func FromFlags(f *pflag.FlagSet) (Config, error) {
 			IssueType:         k.Int("ticket.issuetype"),
 			SubIssueType:      k.Int("ticket.subissuetype"),
 			Category:          k.Int("ticket.category"),
+			WorkType:          k.Int("ticket.worktype"),
 			DueIn:             k.Duration("ticket.duein"),
 			ResolvedStatus:    k.Int("ticket.resolvedstatus"),
 			NoteType:          k.Int("note.type"),

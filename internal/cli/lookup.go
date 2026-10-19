@@ -42,6 +42,15 @@ func newLookupCommand() *lookupCommand {
 						return lookup.Companies(ctx, w, at, args[0], all)
 					},
 				},
+				&lookupSubcommand{
+					Command: simplecommand.New("worktypes", "Print the IDs of work types, for ticket.worktype",
+						simplecommand.WithArgs(cobra.NoArgs),
+					),
+					allUsage: "include inactive work types",
+					run: func(ctx context.Context, w io.Writer, at lookup.Autotask, all bool, _ []string) error {
+						return lookup.WorkTypes(ctx, w, at, all)
+					},
+				},
 			),
 		),
 	}

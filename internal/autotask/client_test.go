@@ -89,7 +89,7 @@ func TestCreatedTicketIsFoundAsOpen(t *testing.T) {
 
 	created, err := c.CreateTicket(ctx, receiver.NewTicket{
 		CompanyID: 100, Title: "HostDown", Description: "desc", ExternalID: "am:abc",
-		Priority: 4, Status: 1, TicketType: 5, Source: 8, Category: 3,
+		Priority: 4, Status: 1, TicketType: 5, Source: 8, Category: 3, WorkType: 29682801,
 		DueDateTime: &due, RecordedAlerts: "aaaa,bbbb",
 	})
 	if err != nil {
@@ -112,7 +112,7 @@ func TestCreatedTicketIsFoundAsOpen(t *testing.T) {
 	for field, want := range map[string]any{
 		"companyID": 100, "title": "HostDown", "description": "desc", "externalID": "am:abc",
 		"priority": 4, "status": 1, "ticketType": 5, "source": 8, "ticketCategory": 3,
-		"dueDateTime": "2026-10-17T08:00:00Z",
+		"billingCodeID": 29682801, "dueDateTime": "2026-10-17T08:00:00Z",
 	} {
 		if stored[field] != want {
 			t.Errorf("stored %s = %v, want %v", field, stored[field], want)
@@ -403,6 +403,9 @@ func validationServer(t *testing.T) *fakeServer {
 	f.udfs["Tickets"] = []entity{{"name": recordedUDF}, {"name": appliedUDF}}
 	f.udfs["Companies"] = []entity{{"name": selectorsUDF}}
 	f.add("Companies", entity{"id": 1, "isActive": true})
+	f.add("BillingCodes", entity{"id": 30, "name": "Remote Support", "useType": 1, "isActive": true})
+	f.add("BillingCodes", entity{"id": 31, "name": "Retired Work", "useType": 1, "isActive": false})
+	f.add("BillingCodes", entity{"id": 32, "name": "Travel Expenses", "useType": 2, "isActive": true})
 	return f
 }
 
@@ -418,17 +421,19 @@ func goodChecks() []autotask.PicklistCheck {
 
 func TestValidateAcceptsGoodConfiguration(t *testing.T) {
 	tests := []struct {
-		name string
-		opts autotask.Options
+		name     string
+		opts     autotask.Options
+		workType int
 	}{
-		{"not following severity", autotask.Options{}},
-		{"following severity", autotask.Options{AppliedPriorityUDF: appliedUDF}},
+		{"not following severity", autotask.Options{}, 0},
+		{"following severity", autotask.Options{AppliedPriorityUDF: appliedUDF}, 0},
+		{"with a work type", autotask.Options{}, 30},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := newClientWith(t, validationServer(t), tt.opts)
 
-			if err := c.Validate(ctx, goodChecks(), 1); err != nil {
+			if err := c.Validate(ctx, goodChecks(), 1, tt.workType); err != nil {
 				t.Errorf("Validate: %v", err)
 			}
 		})
@@ -440,31 +445,39 @@ func TestValidateRejectsBadConfiguration(t *testing.T) {
 		name     string
 		mutate   func(f *fakeServer, checks []autotask.PicklistCheck) []autotask.PicklistCheck
 		catchAll int64
+		workType int
 		want     string
 	}{
 		{"unknown picklist value", func(_ *fakeServer, c []autotask.PicklistCheck) []autotask.PicklistCheck {
 			return append(c, autotask.PicklistCheck{Entity: "Tickets", Field: "priority", Value: 7, Setting: "ticket.priorities.warning"})
-		}, 1, "ticket.priorities.warning: Tickets priority has no value 7; active values are 4 (P1 - Critical), 3 (P4 - Low)"},
+		}, 1, 0, "ticket.priorities.warning: Tickets priority has no value 7; active values are 4 (P1 - Critical), 3 (P4 - Low)"},
 		{"inactive picklist value", func(_ *fakeServer, c []autotask.PicklistCheck) []autotask.PicklistCheck {
 			return append(c, autotask.PicklistCheck{Entity: "Tickets", Field: "priority", Value: 9, Setting: "ticket.priorities.info"})
-		}, 1, "ticket.priorities.info: Tickets priority value 9 (Old) is inactive; active values are 4 (P1 - Critical), 3 (P4 - Low)"},
+		}, 1, 0, "ticket.priorities.info: Tickets priority value 9 (Old) is inactive; active values are 4 (P1 - Critical), 3 (P4 - Low)"},
 		{"picklist with no active values", func(f *fakeServer, c []autotask.PicklistCheck) []autotask.PicklistCheck {
 			f.fields["Tickets"] = append(f.fields["Tickets"], picklist("queueID", pv(7, "Closed", false)))
 			return append(c, autotask.PicklistCheck{Entity: "Tickets", Field: "queueID", Value: 8, Setting: "ticket.queue"})
-		}, 1, "ticket.queue: Tickets queueID has no value 8; it has no active values"},
+		}, 1, 0, "ticket.queue: Tickets queueID has no value 8; it has no active values"},
 		{"missing recorded alerts UDF", func(f *fakeServer, c []autotask.PicklistCheck) []autotask.PicklistCheck {
 			f.udfs["Tickets"] = nil
 			return c
-		}, 1, recordedUDF},
+		}, 1, 0, recordedUDF},
 		{"missing company selectors UDF", func(f *fakeServer, c []autotask.PicklistCheck) []autotask.PicklistCheck {
 			f.udfs["Companies"] = nil
 			return c
-		}, 1, selectorsUDF},
-		{"unknown catch-all company", func(_ *fakeServer, c []autotask.PicklistCheck) []autotask.PicklistCheck { return c }, 99, "catch-all company 99"},
+		}, 1, 0, selectorsUDF},
+		{"unknown catch-all company", func(_ *fakeServer, c []autotask.PicklistCheck) []autotask.PicklistCheck { return c }, 99, 0, "catch-all company 99"},
 		{"missing applied priority UDF", func(f *fakeServer, c []autotask.PicklistCheck) []autotask.PicklistCheck {
 			f.udfs["Tickets"] = []entity{{"name": recordedUDF}}
 			return c
-		}, 1, appliedUDF},
+		}, 1, 0, appliedUDF},
+		{"unknown work type", func(_ *fakeServer, c []autotask.PicklistCheck) []autotask.PicklistCheck { return c }, 1, 99, "work type 99 does not exist; active work types are 30 (Remote Support)"},
+		{"inactive work type", func(_ *fakeServer, c []autotask.PicklistCheck) []autotask.PicklistCheck { return c }, 1, 31, "work type 31 (Retired Work) is inactive; active work types are 30 (Remote Support)"},
+		{"billing code that is not a work type", func(_ *fakeServer, c []autotask.PicklistCheck) []autotask.PicklistCheck { return c }, 1, 32, "work type 32 does not exist"},
+		{"no active work types", func(f *fakeServer, c []autotask.PicklistCheck) []autotask.PicklistCheck {
+			f.entities["BillingCodes"] = nil
+			return c
+		}, 1, 30, "work type 30 does not exist; there are no active work types"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -472,7 +485,7 @@ func TestValidateRejectsBadConfiguration(t *testing.T) {
 			checks := tt.mutate(f, goodChecks())
 			c := newClientWith(t, f, autotask.Options{AppliedPriorityUDF: appliedUDF})
 
-			err := c.Validate(ctx, checks, tt.catchAll)
+			err := c.Validate(ctx, checks, tt.catchAll, tt.workType)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Errorf("Validate error = %v, want one mentioning %q", err, tt.want)
 			}
@@ -489,8 +502,12 @@ func TestCreateTicketReturnsItsNumber(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if want := f.get("Tickets", int(created.ID))["ticketNumber"]; created.Number == "" || created.Number != want {
+	stored := f.get("Tickets", int(created.ID))
+	if want := stored["ticketNumber"]; created.Number == "" || created.Number != want {
 		t.Errorf("Number = %q, want %v", created.Number, want)
+	}
+	if _, ok := stored["billingCodeID"]; ok {
+		t.Error("unset work type should not be sent")
 	}
 }
 
@@ -590,6 +607,32 @@ func TestSearchCompanies(t *testing.T) {
 			}
 			if !slices.Equal(ids, tt.want) {
 				t.Errorf("IDs = %v, want %v", ids, tt.want)
+			}
+		})
+	}
+}
+
+func TestWorkTypes(t *testing.T) {
+	tests := []struct {
+		name            string
+		includeInactive bool
+		want            []lookup.WorkType
+	}{
+		{"active work types", false, []lookup.WorkType{{ID: 30, Name: "Remote Support", Active: true}}},
+		{"including inactive work types", true, []lookup.WorkType{{ID: 30, Name: "Remote Support", Active: true}, {ID: 31, Name: "Retired Work"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := validationServer(t)
+			f.pageSize = 1
+			c := newClient(t, f)
+
+			got, err := c.WorkTypes(ctx, tt.includeInactive)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("WorkTypes = %+v, want %+v", got, tt.want)
 			}
 		})
 	}

@@ -12,6 +12,7 @@ import (
 type fakeAutotask struct {
 	picklists map[string]map[string][]lookup.PicklistValue
 	companies []lookup.Company
+	workTypes []lookup.WorkType
 	err       error
 
 	searched        string
@@ -25,6 +26,11 @@ func (f *fakeAutotask) Picklists(_ context.Context, entity string) (map[string][
 func (f *fakeAutotask) SearchCompanies(_ context.Context, name string, includeInactive bool) ([]lookup.Company, error) {
 	f.searched, f.includeInactive = name, includeInactive
 	return f.companies, f.err
+}
+
+func (f *fakeAutotask) WorkTypes(_ context.Context, includeInactive bool) ([]lookup.WorkType, error) {
+	f.includeInactive = includeInactive
+	return f.workTypes, f.err
 }
 
 func newFake() *fakeAutotask {
@@ -212,5 +218,50 @@ func TestErrorsAreReturned(t *testing.T) {
 	}
 	if err := lookup.Companies(context.Background(), &b, f, "x", false); err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Errorf("Companies err = %v", err)
+	}
+	if err := lookup.WorkTypes(context.Background(), &b, f, false); err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Errorf("WorkTypes err = %v", err)
+	}
+}
+
+func TestWorkTypes(t *testing.T) {
+	workTypes := []lookup.WorkType{
+		{ID: 29682801, Name: "Remote Support", Active: true},
+		{ID: 29682805, Name: "after hours", Active: true},
+		{ID: 29682810, Name: "Old Work"},
+	}
+	tests := []struct {
+		name      string
+		all       bool
+		workTypes []lookup.WorkType
+		want      string
+	}{
+		{"ordered by name", false, workTypes, `ID        NAME
+29682805  after hours
+29682810  Old Work
+29682801  Remote Support
+`},
+		{"all shows whether active", true, workTypes, `ID        NAME            ACTIVE
+29682805  after hours     yes
+29682810  Old Work        no
+29682801  Remote Support  yes
+`},
+		{"none", false, nil, `no work types
+`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &fakeAutotask{workTypes: tt.workTypes}
+			var b strings.Builder
+			if err := lookup.WorkTypes(context.Background(), &b, f, tt.all); err != nil {
+				t.Fatal(err)
+			}
+			if got := b.String(); got != tt.want {
+				t.Errorf("output:\n%s\nwant:\n%s", got, tt.want)
+			}
+			if f.includeInactive != tt.all {
+				t.Errorf("includeInactive = %v, want %v", f.includeInactive, tt.all)
+			}
+		})
 	}
 }

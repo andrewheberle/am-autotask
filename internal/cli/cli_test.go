@@ -26,6 +26,8 @@ func TestExecute(t *testing.T) {
 		{name: "lookup without a subcommand", args: []string{"lookup"}, wantIs: errNoCommand},
 		{name: "lookup companies needs a name", args: []string{"lookup", "companies"}, wantMsg: "accepts 1 arg"},
 		{name: "lookup needs only Autotask settings", args: []string{"lookup", "picklists"}, wantMsg: "autotask.username"},
+		{name: "lookup worktypes takes no arguments", args: []string{"lookup", "worktypes", "extra"}, wantMsg: "unknown command"},
+		{name: "lookup worktypes needs only Autotask settings", args: []string{"lookup", "worktypes"}, wantMsg: "autotask.username"},
 		{name: "lookup does not take receiver flags", args: []string{"lookup", "picklists", "--ticket.queue=8"}, wantMsg: "unknown flag: --ticket.queue"},
 	}
 	for _, tt := range tests {

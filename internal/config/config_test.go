@@ -81,7 +81,7 @@ func TestDefaults(t *testing.T) {
 	if r.SeverityLabel != "severity" {
 		t.Errorf("SeverityLabel = %q, want severity", r.SeverityLabel)
 	}
-	if r.QueueID != 0 || r.IssueType != 0 || r.SubIssueType != 0 || r.Category != 0 || r.DueIn != 0 {
+	if r.QueueID != 0 || r.IssueType != 0 || r.SubIssueType != 0 || r.Category != 0 || r.WorkType != 0 || r.DueIn != 0 {
 		t.Errorf("optional ticket fields should default to unset: %+v", r)
 	}
 }
@@ -95,6 +95,7 @@ ticket:
     critical: 4
     warning: 2
   queue: 8
+  worktype: 29682801
   duein: 4h
   resolvedstatus: 0
 note:
@@ -111,8 +112,8 @@ note:
 	if r.CatchAllCompanyID != 175 || r.DefaultPriority != 3 || r.Priorities["critical"] != 4 || r.Priorities["warning"] != 2 {
 		t.Errorf("catch-all/priorities = %d/%d/%v", r.CatchAllCompanyID, r.DefaultPriority, r.Priorities)
 	}
-	if r.QueueID != 8 || r.DueIn != 4*time.Hour || r.ResolvedStatus != 0 || r.NotePublish != 4 {
-		t.Errorf("queue/duein/resolved/publish = %d/%v/%d/%d", r.QueueID, r.DueIn, r.ResolvedStatus, r.NotePublish)
+	if r.QueueID != 8 || r.WorkType != 29682801 || r.DueIn != 4*time.Hour || r.ResolvedStatus != 0 || r.NotePublish != 4 {
+		t.Errorf("queue/worktype/duein/resolved/publish = %d/%d/%v/%d/%d", r.QueueID, r.WorkType, r.DueIn, r.ResolvedStatus, r.NotePublish)
 	}
 }
 

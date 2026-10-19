@@ -329,6 +329,7 @@ type ticketBody struct {
 	IssueType         int        `json:"issueType,omitempty"`
 	SubIssueType      int        `json:"subIssueType,omitempty"`
 	TicketCategory    int        `json:"ticketCategory,omitempty"`
+	BillingCodeID     int        `json:"billingCodeID,omitempty"` // the work type
 	DueDateTime       string     `json:"dueDateTime,omitempty"`
 	UserDefinedFields []udfValue `json:"userDefinedFields,omitempty"`
 }
@@ -353,6 +354,7 @@ func (c *Client) CreateTicket(ctx context.Context, t receiver.NewTicket) (receiv
 		IssueType:      t.IssueType,
 		SubIssueType:   t.SubIssueType,
 		TicketCategory: t.Category,
+		BillingCodeID:  t.WorkType,
 		UserDefinedFields: []udfValue{
 			{Name: c.opts.RecordedAlertsUDF, Value: &t.RecordedAlerts},
 		},
