@@ -54,8 +54,8 @@ histogram_quantile(0.95, sum by (operation, le) (rate(am_autotask_autotask_reque
 # tickets raised against the catch-all company per day, by reason
 sum by (reason) (increase(am_autotask_catchall_tickets_total[1d]))
 
-# deliveries Alertmanager could not make to am-autotask
-sum(rate(alertmanager_notifications_failed_total{integration="webhook", receiver="autotask"}[5m]))
+# deliveries Alertmanager could not make to webhook receivers, including am-autotask
+sum(rate(alertmanager_notifications_failed_total{integration="webhook"}[5m]))
 ```
 
 ## Traces
@@ -72,9 +72,11 @@ With [tracing](../README.md#tracing) enabled, each notification is a trace conti
 
 - am-autotask is scraped with `job="am-autotask"`
 - Alertmanager is scraped with `job="alertmanager"`
-- the Alertmanager receiver pointing at am-autotask is named `autotask`
+- am-autotask is Alertmanager's only webhook receiver
 
 Adjust the selectors if yours differ. `AmAutotaskCompanySelectorsStale` assumes the default `company.refresh` of 15 minutes; set its threshold to about three refresh intervals if you change it.
+
+By default Alertmanager's `alertmanager_notifications_failed_total` has no receiver label, so `AlertmanagerAutotaskNotificationsFailing` counts failed deliveries to every webhook receiver. With Alertmanager v0.27.0 or later and `--enable-feature=receiver-name-in-metrics`, it gains a `receiver_name` label: add `receiver_name="autotask"` (your receiver's name) to the rule and the query above to exclude other webhook receivers.
 
 The rules come with unit tests. Run them with [promtool](https://prometheus.io/docs/prometheus/latest/command-line/promtool/) after any change:
 
@@ -137,6 +139,7 @@ No am-autotask target has been discovered, so none of the other am-autotask aler
 
 Alertmanager is failing to deliver notifications to am-autotask. This catches problems am-autotask cannot report itself, such as being unreachable.
 
+- Unless the rule is narrowed with `receiver_name` (see [Alerting rules](#alerting-rules)), it also fires when another webhook receiver is failing. Alertmanager's logs name the receiver.
 - If `AmAutotaskDown` is also firing, start there.
 - If am-autotask is up, check Alertmanager's logs for the status code. HTTP 401 means the bearer token Alertmanager sends does not match `webhook.token`. HTTP 500 means am-autotask is failing temporarily: see [AmAutotaskTemporaryFailures](#amautotasktemporaryfailures).
 - Check the webhook URL in Alertmanager's configuration.

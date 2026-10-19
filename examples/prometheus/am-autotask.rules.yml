@@ -30,8 +30,11 @@ groups:
           runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskabsent
 
       - alert: AlertmanagerAutotaskNotificationsFailing
+        # Counts failures to every webhook receiver. With Alertmanager v0.27.0 or
+        # later and --enable-feature=receiver-name-in-metrics, add
+        # receiver_name="autotask" to exclude other webhook receivers.
         expr: |
-          sum by (instance) (rate(alertmanager_notifications_failed_total{job="alertmanager", integration="webhook", receiver="autotask"}[5m])) > 0
+          sum by (instance) (rate(alertmanager_notifications_failed_total{job="alertmanager", integration="webhook"}[5m])) > 0
         for: 15m
         labels:
           severity: critical
