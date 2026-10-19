@@ -17,7 +17,7 @@ tests:
         values: '0+3x60'
       - series: 'am_autotask_notifications_total{job="am-autotask", instance="am-autotask:8080", result="temporary_failure"}'
         values: '0x60'
-      - series: 'alertmanager_notifications_failed_total{job="alertmanager", instance="alertmanager:9093", integration="webhook", receiver="autotask"}'
+      - series: 'alertmanager_notifications_failed_total{job="alertmanager", instance="alertmanager:9093", integration="webhook", reason="serverError"}'
         values: '0x60'
       # reloaded every 15 minutes
       - series: 'am_autotask_company_selectors_age_seconds{job="am-autotask", instance="am-autotask:8080"}'
@@ -99,11 +99,32 @@ tests:
   - name: alertmanager cannot deliver
     interval: 1m
     input_series:
-      - series: 'alertmanager_notifications_failed_total{job="alertmanager", instance="alertmanager:9093", integration="webhook", receiver="autotask"}'
+      - series: 'alertmanager_notifications_failed_total{job="alertmanager", instance="alertmanager:9093", integration="webhook", reason="serverError"}'
         values: '0+1x30'
-      # failures to other receivers are not am-autotask's concern
-      - series: 'alertmanager_notifications_failed_total{job="alertmanager", instance="alertmanager:9093", integration="email", receiver="email"}'
+      # failures to other integrations are not am-autotask's concern
+      - series: 'alertmanager_notifications_failed_total{job="alertmanager", instance="alertmanager:9093", integration="email", reason="serverError"}'
         values: '0+1x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: AlertmanagerAutotaskNotificationsFailing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: alertmanager:9093
+            exp_annotations:
+              summary: Alertmanager cannot deliver to am-autotask
+              description: Alertmanager alertmanager:9093 has been failing to deliver notifications to am-autotask for 15 minutes. Deliveries are retried, but alerts are not reaching Autotask.
+              runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#alertmanagerautotasknotificationsfailing
+
+  # with receiver-name-in-metrics enabled but the rule not narrowed to
+  # receiver_name="autotask", another webhook receiver failing still fires
+  - name: alertmanager cannot deliver to another webhook receiver
+    interval: 1m
+    input_series:
+      - series: 'alertmanager_notifications_failed_total{job="alertmanager", instance="alertmanager:9093", integration="webhook", receiver_name="other", reason="serverError"}'
+        values: '0+1x30'
+      - series: 'alertmanager_notifications_failed_total{job="alertmanager", instance="alertmanager:9093", integration="webhook", receiver_name="autotask", reason="serverError"}'
+        values: '0x30'
     alert_rule_test:
       - eval_time: 20m
         alertname: AlertmanagerAutotaskNotificationsFailing
