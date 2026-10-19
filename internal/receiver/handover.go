@@ -130,7 +130,7 @@ func (r *Receiver) moveFrom(ctx context.Context, n Notification, current Ticket,
 	if err := r.at.CreateNote(ctx, NewNote{
 		TicketID:    t.ID,
 		Title:       truncate(movedTitle(len(moved), current, emptied), maxNoteTitle),
-		Description: movedDescription(n, moved, current, emptied),
+		Description: movedDescription(n, moved, current, emptied, r.opts.Templates.loc),
 		NoteType:    r.opts.NoteType,
 		Publish:     r.opts.NotePublish,
 	}); err != nil {

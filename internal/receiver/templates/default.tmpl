@@ -4,7 +4,7 @@ redefine any of these blocks; the rest keep the definitions here.
 */ -}}
 
 {{define "ticket.title" -}}
-{{default (default "Alert group" .CommonLabels.alertname) .GroupLabels.alertname}}
+{{with .CommonAnnotations.summary}}{{.}}{{else}}{{default (default "Alert group" .CommonLabels.alertname) .GroupLabels.alertname}}{{end}}
 {{- with labels .GroupLabels "alertname"}}{{if ne . "{}"}} {{.}}{{end}}{{end}}
 {{- end}}
 
@@ -30,7 +30,7 @@ Firing ({{len .Alerts}}):
 {{- with trim .Annotations.runbook_url}}{{if ne . (trim $.CommonAnnotations.runbook_url)}}
   Runbook: {{.}}
 {{- end}}{{end}}
-  Started: {{.StartsAt.UTC.Format "2006-01-02T15:04:05Z07:00"}}
+  Started: {{time .StartsAt}}
 {{- with .GeneratorURL}}
   Source: {{.}}
 {{- end}}
@@ -38,7 +38,7 @@ Firing ({{len .Alerts}}):
 {{end}}
 
 {{define "note.title" -}}
-{{if .GroupResolved}}Alert group resolved: {{end}}{{len .Fired}} firing, {{len .Resolved}} resolved
+{{default (default "Alert group" .CommonLabels.alertname) .GroupLabels.alertname}}{{if .GroupResolved}} resolved{{end}}: {{len .Fired}} firing, {{len .Resolved}} resolved
 {{- end}}
 
 {{define "note.description" -}}
@@ -51,7 +51,7 @@ Firing ({{len .Alerts}}):
 {{- with trim .Annotations.runbook_url}}{{if ne . (trim $.CommonAnnotations.runbook_url)}}
   Runbook: {{.}}
 {{- end}}{{end}}
-  Started: {{.StartsAt.UTC.Format "2006-01-02T15:04:05Z07:00"}}
+  Started: {{time .StartsAt}}
 {{- with .GeneratorURL}}
   Source: {{.}}
 {{- end}}
@@ -64,9 +64,9 @@ Firing ({{len .Alerts}}):
 {{- with .Annotations.summary}}
   {{.}}
 {{- end}}
-  Started: {{.StartsAt.UTC.Format "2006-01-02T15:04:05Z07:00"}}
+  Started: {{time .StartsAt}}
 {{- if not .EndsAt.IsZero}}
-  Ended: {{.EndsAt.UTC.Format "2006-01-02T15:04:05Z07:00"}}
+  Ended: {{time .EndsAt}}
 {{- end}}
 {{- with .GeneratorURL}}
   Source: {{.}}

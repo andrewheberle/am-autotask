@@ -118,7 +118,7 @@ func movedTitle(moved int, current Ticket, emptied bool) string {
 	return fmt.Sprintf("%d alerts moved to %s", moved, current.Number)
 }
 
-func movedDescription(n Notification, moved []Alert, current Ticket, emptied bool) string {
+func movedDescription(n Notification, moved []Alert, current Ticket, emptied bool, loc *time.Location) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "These alerts now belong to alert group %s, tracked on %s. "+
@@ -127,7 +127,7 @@ func movedDescription(n Notification, moved []Alert, current Ticket, emptied boo
 		fmt.Fprintf(&b, "No alerts remain on this ticket; further changes are recorded on %s.\n", current.Number)
 	}
 	fmt.Fprintf(&b, "\nMoved (%d):\n", len(moved))
-	writeAlerts(&b, n, moved)
+	writeAlerts(&b, n, moved, loc)
 
 	return truncate(b.String(), maxNoteDescription)
 }
@@ -152,16 +152,16 @@ func alertmanagerLink(n Notification) string {
 	return strings.TrimSuffix(n.ExternalURL, "/") + "/#/alerts?receiver=" + url.QueryEscape(n.Receiver)
 }
 
-// writeAlerts lists alerts for system notes.
-func writeAlerts(b *strings.Builder, n Notification, alerts []Alert) {
+// writeAlerts lists alerts for system notes, showing times in loc.
+func writeAlerts(b *strings.Builder, n Notification, alerts []Alert, loc *time.Location) {
 	for _, a := range alerts {
 		fmt.Fprintf(b, "- %s %s\n", a.Labels["alertname"], formatLabels(a.Labels, withAlertname(n.GroupLabels)))
 		if s := a.Annotations["summary"]; s != "" {
 			fmt.Fprintf(b, "  %s\n", s)
 		}
-		fmt.Fprintf(b, "  Started: %s\n", a.StartsAt.UTC().Format(time.RFC3339))
+		fmt.Fprintf(b, "  Started: %s\n", formatTime(a.StartsAt, loc))
 		if a.Status == statusResolved && !a.EndsAt.IsZero() {
-			fmt.Fprintf(b, "  Ended: %s\n", a.EndsAt.UTC().Format(time.RFC3339))
+			fmt.Fprintf(b, "  Ended: %s\n", formatTime(a.EndsAt, loc))
 		}
 		if a.GeneratorURL != "" {
 			fmt.Fprintf(b, "  Source: %s\n", a.GeneratorURL)

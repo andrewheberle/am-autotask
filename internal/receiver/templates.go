@@ -85,6 +85,8 @@ type AlertData struct {
 // and descriptions. Blocks a templates file does not define keep their
 // built-in definitions.
 type Templates struct {
+	// loc is the time zone times are shown in
+	loc     *time.Location
 	builtin *template.Template
 	// custom holds the templates file's blocks over the built-in ones; nil
 	// when no file was given
@@ -108,7 +110,7 @@ func ParseTemplates(path string, loc *time.Location) (*Templates, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parsing built-in templates: %w", err)
 	}
-	t := &Templates{builtin: builtin}
+	t := &Templates{loc: loc, builtin: builtin}
 	if path == "" {
 		return t, nil
 	}
@@ -180,6 +182,12 @@ func execute(t *template.Template, name string, data any) (string, error) {
 	return b.String(), nil
 }
 
+// formatTime shows t in loc, laid out as times are throughout tickets and
+// notes.
+func formatTime(t time.Time, loc *time.Location) string {
+	return t.In(loc).Format(defaultTimeLayout)
+}
+
 func templateFuncs(loc *time.Location) template.FuncMap {
 	return template.FuncMap{
 		"labels": templateLabels,
@@ -189,7 +197,7 @@ func templateFuncs(loc *time.Location) template.FuncMap {
 		"time": func(t time.Time, layout ...string) (string, error) {
 			switch len(layout) {
 			case 0:
-				return t.In(loc).Format(defaultTimeLayout), nil
+				return formatTime(t, loc), nil
 			case 1:
 				return t.In(loc).Format(layout[0]), nil
 			}

@@ -22,10 +22,10 @@ See [GLOSSARY.md](GLOSSARY.md) for the terms used here.
 
 ## Ticket contents
 
-- **Title.** The alert name followed by the remaining group labels, for example `KubePodCrashLooping {cluster="prod", namespace="payments"}`.
-- **Description.** Any system notices first (see below), then the `summary` and `description` annotations when every alert shares them, then the group labels, a link to the alerts in Alertmanager (when Alertmanager sends its `externalURL`), and each firing alert with its labels, summary, start time and source link.
+- **Title.** The `summary` annotation when every alert shares it, otherwise the alert name, followed by the remaining group labels, for example `Pod is crash looping {cluster="prod", namespace="payments"}` or `KubePodCrashLooping {cluster="prod", namespace="payments"}`. Severity is left out, since it can change while the ticket is open; the ticket's priority shows it instead.
+- **Description.** Any system notices first (see below), then the `summary` and `description` annotations when every alert shares them, then the group labels, a link to the alerts in Alertmanager (when Alertmanager sends its `externalURL`), and each firing alert with its labels, summary, start time and source link. Times are shown in the [local time zone](#functions), such as `2026-10-19 10:15:00 AWST`.
 - **Runbooks.** An alert's `runbook_url` annotation is shown so the service desk can follow it. A runbook shared by every alert is shown once, near the top of the description as `Runbook: <url>`; otherwise each alert's runbook is shown under that alert. Notes show the runbooks of newly firing alerts, unless it is the runbook every alert shares, and never for resolved or moved alerts. The value is shown as written, without checking that it is a valid URL.
-- **Notes.** Titled with the number of alerts that fired and resolved, for example `1 firing, 0 resolved`, prefixed with `Alert group resolved:` when the whole group has resolved, and listing each alert. When the ticket's priority follows severity, a note also says when the priority was raised or lowered, or that a person changed it.
+- **Notes.** Titled with the alert name and the number of alerts that fired and resolved, for example `HostDown: 1 firing, 0 resolved`, or `HostDown resolved: 0 firing, 2 resolved` when the whole group has resolved, and listing each alert. When the ticket's priority follows severity, a note also says when the priority was raised or lowered, or that a person changed it.
 
 - **System notices.** Explanations of something am-autotask did or detected come first in a description or note: a ticket raised against the catch-all company because several companies matched, the group's previous ticket, the orphaned tickets a ticket continues, alerts no longer recorded individually, and priority changes. [Ticket templates](#ticket-templates) cannot remove them (see [ADR-0005](docs/adr/0005-system-notices-stay-outside-ticket-templates.md)).
 
@@ -84,7 +84,7 @@ As well as Go's [built-in functions](https://pkg.go.dev/text/template#hdr-Functi
 | `trim STRING` | `{{trim .Annotations.runbook_url}}` | STRING without leading and trailing whitespace. |
 | `upper STRING`, `lower STRING` | `{{upper .GroupLabels.tenant_id}}` | STRING in upper or lower case. |
 
-The local time zone comes from the `TZ` environment variable, such as `TZ=Australia/Perth`, or else the host's time zone; the container image uses UTC unless `TZ` is set. Time zone data is built in, so `TZ` works on hosts and images without it. An unknown `TZ` stops `serve` at startup, rather than silently falling back to UTC. On Windows `TZ` is ignored and the system time zone is used.
+The local time zone comes from the `TZ` environment variable, such as `TZ=Australia/Perth`, or else the host's time zone; the container image uses UTC unless `TZ` is set. The built-in wording and the fixed notes show times the same way. Time zone data is built in, so `TZ` works on hosts and images without it. An unknown `TZ` stops `serve` at startup, rather than silently falling back to UTC. On Windows `TZ` is ignored and the system time zone is used.
 
 ### Errors and previews
 
