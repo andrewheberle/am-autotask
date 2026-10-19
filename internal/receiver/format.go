@@ -187,3 +187,39 @@ func joinIDs(ids []int64) string {
 	}
 	return strings.Join(s, ", ")
 }
+
+// linkedNotice is the system notice on a new ticket linked to a problem
+// ticket.
+func linkedNotice(problem Ticket) string {
+	return fmt.Sprintf("Linked to problem ticket %s: this alert group fired again soon after its previous ticket was completed.", problem.Number)
+}
+
+// problemNotices are the system notices for a new problem ticket, naming the
+// tickets it links and explaining a previous ticket left unlinked.
+func problemNotices(rec *recurrence, created Ticket) []string {
+	if rec.linkPrevious() {
+		return []string{fmt.Sprintf("Linked tickets: %s, %s", rec.previous.Number, created.Number)}
+	}
+
+	notices := []string{"Linked ticket: " + created.Number}
+	switch {
+	case rec.previousProblem != nil:
+		notices = append(notices, fmt.Sprintf("Previous ticket %s stays linked to completed problem ticket %s.", rec.previous.Number, rec.previousProblem.Number))
+	default:
+		notices = append(notices, fmt.Sprintf("NOTE: previous ticket %s is not an Incident, so it could not be linked to this problem ticket.", rec.previous.Number))
+	}
+	return notices
+}
+
+// recurrenceFailedNotice explains on a new ticket why it is not linked to a
+// problem ticket.
+func recurrenceFailedNotice(rec *recurrence) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "NOTE: this alert group fired again soon after its previous ticket %s was completed, but linking to a problem ticket failed: %v\n\n", rec.previous.Number, rec.err)
+	if rec.problem != nil {
+		fmt.Fprintf(&b, "Link this ticket, and %s if it is an Incident, to problem ticket %s by hand.", rec.previous.Number, rec.problem.Number)
+	} else {
+		fmt.Fprintf(&b, "Link this ticket, and %s if it is an Incident, to a problem ticket by hand.", rec.previous.Number)
+	}
+	return b.String()
+}

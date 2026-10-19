@@ -26,9 +26,13 @@ type fakeAutotask struct {
 
 type fakeTicket struct {
 	receiver.NewTicket
-	ID     int64
-	Number string
+	ID          int64
+	Number      string
+	CompletedAt time.Time
 }
+
+// errRejected is Autotask refusing a request as invalid.
+var errRejected = fmt.Errorf("autotask rejected the request: %w", receiver.ErrPermanent)
 
 func newFakeAutotask() *fakeAutotask {
 	return &fakeAutotask{nextID: 1000, failures: map[string]error{}}
@@ -40,17 +44,59 @@ func (f *fakeAutotask) failNext(op string, err error) {
 	f.failures[op] = err
 }
 
-func (f *fakeAutotask) fail(op string) error {
-	err := f.failures[op]
-	delete(f.failures, op)
-	return err
+// fail returns the error injected for op, or for op on one ticket as
+// "op:id", once.
+func (f *fakeAutotask) fail(op string, id ...int64) error {
+	keys := []string{op}
+	for _, i := range id {
+		keys = append(keys, fmt.Sprintf("%s:%d", op, i))
+	}
+	for _, key := range keys {
+		if err, ok := f.failures[key]; ok {
+			delete(f.failures, key)
+			return err
+		}
+	}
+	return nil
 }
 
 func (f *fakeAutotask) toTicket(t *fakeTicket) receiver.Ticket {
 	return receiver.Ticket{
 		ID: t.ID, Number: t.Number, Status: t.Status, ExternalID: t.ExternalID, RecordedAlerts: t.RecordedAlerts,
 		Priority: t.Priority, AppliedPriority: t.AppliedPriority,
+		Type: t.TicketType, ProblemTicketID: t.ProblemTicketID, CompletedAt: t.CompletedAt,
 	}
+}
+
+func (f *fakeAutotask) Ticket(_ context.Context, id int64) (*receiver.Ticket, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.fail("Ticket"); err != nil {
+		return nil, err
+	}
+
+	t := f.ticket(id)
+	if t == nil {
+		return nil, nil
+	}
+	tt := f.toTicket(t)
+	return &tt, nil
+}
+
+// checkProblemLink applies Autotask's rules for linking a ticket of type
+// ticketType to problemID.
+func (f *fakeAutotask) checkProblemLink(ticketType int, problemID int64) error {
+	if problemID == 0 {
+		return nil
+	}
+	if ticketType != receiver.TicketTypeIncident {
+		return fmt.Errorf("ticketType must be Incident to link a problem ticket: %w", errRejected)
+	}
+	p := f.ticket(problemID)
+	if p == nil || p.TicketType != receiver.TicketTypeProblem {
+		return fmt.Errorf("ticket %d is not a problem ticket: %w", problemID, errRejected)
+	}
+	return nil
 }
 
 func (f *fakeAutotask) OpenAlertTickets(_ context.Context) ([]receiver.Ticket, error) {
@@ -105,6 +151,14 @@ func (f *fakeAutotask) CreateTicket(_ context.Context, t receiver.NewTicket) (re
 	if err := f.fail("CreateTicket"); err != nil {
 		return receiver.Ticket{}, err
 	}
+	if t.TicketType == receiver.TicketTypeProblem {
+		if err := f.fail("CreateProblemTicket"); err != nil {
+			return receiver.Ticket{}, err
+		}
+	}
+	if err := f.checkProblemLink(t.TicketType, t.ProblemTicketID); err != nil {
+		return receiver.Ticket{}, err
+	}
 
 	f.nextID++
 	ft := &fakeTicket{NewTicket: t, ID: f.nextID, Number: fmt.Sprintf("T20261017.%04d", f.nextID-1000)}
@@ -126,13 +180,19 @@ func (f *fakeAutotask) CreateNote(_ context.Context, n receiver.NewNote) error {
 func (f *fakeAutotask) UpdateTicket(_ context.Context, id int64, u receiver.TicketUpdate) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := f.fail("UpdateTicket"); err != nil {
+	if err := f.fail("UpdateTicket", id); err != nil {
 		return err
 	}
 
 	t := f.ticket(id)
 	if t == nil {
 		return fmt.Errorf("no ticket %d", id)
+	}
+	if u.ProblemTicketID != nil {
+		if err := f.checkProblemLink(t.TicketType, *u.ProblemTicketID); err != nil {
+			return err
+		}
+		t.ProblemTicketID = *u.ProblemTicketID
 	}
 	if u.RecordedAlerts != nil {
 		t.RecordedAlerts = *u.RecordedAlerts
@@ -152,6 +212,13 @@ func (f *fakeAutotask) UpdateTicket(_ context.Context, id int64, u receiver.Tick
 	return nil
 }
 
+// get returns a copy of the ticket with this ID.
+func (f *fakeAutotask) get(id int64) fakeTicket {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return *f.ticket(id)
+}
+
 func (f *fakeAutotask) ticket(id int64) *fakeTicket {
 	for _, t := range f.tickets {
 		if t.ID == id {
@@ -165,9 +232,16 @@ func (f *fakeAutotask) ticket(id int64) *fakeTicket {
 
 // closeTicket simulates a technician completing a ticket in Autotask.
 func (f *fakeAutotask) closeTicket(id int64) {
+	f.closeTicketAt(id, testTime)
+}
+
+// closeTicketAt simulates a technician completing a ticket at a given time.
+func (f *fakeAutotask) closeTicketAt(id int64, at time.Time) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.ticket(id).Status = completeStatus
+	t := f.ticket(id)
+	t.Status = completeStatus
+	t.CompletedAt = at
 }
 
 // setPriority simulates a technician changing a ticket's priority.
@@ -183,6 +257,18 @@ func (f *fakeAutotask) setAppliedPriority(id int64, applied string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.ticket(id).AppliedPriority = applied
+}
+
+// addTicket simulates a ticket created outside the receiver, returning its
+// ID.
+func (f *fakeAutotask) addTicket(t fakeTicket) int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.nextID++
+	t.ID = f.nextID
+	t.Number = fmt.Sprintf("T20261017.%04d", f.nextID-1000)
+	f.tickets = append(f.tickets, &t)
+	return t.ID
 }
 
 func (f *fakeAutotask) allTickets() []fakeTicket {

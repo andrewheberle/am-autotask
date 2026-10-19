@@ -1,0 +1,25 @@
+=== ticket title
+Flaky host
+=== ticket description
+
+=== ticket title
+Host is down
+=== ticket description
+
+=== ticket title
+Host is down {tenant_id="foo"}
+=== ticket description
+Previous ticket for this alert group: T20261017.0002
+
+Linked to problem ticket T20261017.0001: this alert group fired again soon after its previous ticket was completed.
+
+Host is down
+
+Group labels: {alertname="HostDown", tenant_id="foo"}
+Alertmanager: http://alertmanager:9093/#/alerts?receiver=autotask
+
+Firing (1):
+- HostDown {instance="web1", severity="critical"}
+  summary of aaaa
+  Started: 2026-10-17 03:50:00 UTC
+  Source: http://prometheus/graph?g0.expr=aaaa

@@ -433,7 +433,7 @@ func TestValidateAcceptsGoodConfiguration(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			c := newClientWith(t, validationServer(t), tt.opts)
 
-			if err := c.Validate(ctx, goodChecks(), 1, tt.workType); err != nil {
+			if err := c.Validate(ctx, goodChecks(), 1, nil, tt.workType); err != nil {
 				t.Errorf("Validate: %v", err)
 			}
 		})
@@ -485,7 +485,7 @@ func TestValidateRejectsBadConfiguration(t *testing.T) {
 			checks := tt.mutate(f, goodChecks())
 			c := newClientWith(t, f, autotask.Options{AppliedPriorityUDF: appliedUDF})
 
-			err := c.Validate(ctx, checks, tt.catchAll, tt.workType)
+			err := c.Validate(ctx, checks, tt.catchAll, nil, tt.workType)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Errorf("Validate error = %v, want one mentioning %q", err, tt.want)
 			}
@@ -633,6 +633,134 @@ func TestWorkTypes(t *testing.T) {
 			}
 			if !slices.Equal(got, tt.want) {
 				t.Errorf("WorkTypes = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTicketReadsProblemFields(t *testing.T) {
+	f := newFakeServer(t)
+	c := newClient(t, f)
+	f.add("Tickets", entity{
+		"id": 50, "ticketNumber": "T20261019.0050", "status": 5, "ticketType": 2,
+		"problemTicketId": 51, "completedDate": "2026-10-19T06:22:42.070Z",
+	})
+	f.add("Tickets", entity{"id": 51, "ticketNumber": "T20261019.0051", "status": 1, "ticketType": 3, "problemTicketId": nil, "completedDate": nil})
+
+	tests := []struct {
+		name string
+		id   int64
+		want *receiver.Ticket
+	}{
+		{"completed incident", 50, &receiver.Ticket{
+			ID: 50, Number: "T20261019.0050", Status: 5, Type: receiver.TicketTypeIncident, ProblemTicketID: 51,
+			CompletedAt: time.Date(2026, 10, 19, 6, 22, 42, 70_000_000, time.UTC),
+		}},
+		{"open problem", 51, &receiver.Ticket{ID: 51, Number: "T20261019.0051", Status: 1, Type: receiver.TicketTypeProblem}},
+		{"missing", 99, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := c.Ticket(ctx, tt.id)
+			if err != nil {
+				t.Fatalf("Ticket: %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Ticket = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPreviousTicketReadsCompletion(t *testing.T) {
+	f := newFakeServer(t)
+	c := newClient(t, f)
+	f.add("Tickets", entity{"id": 50, "ticketNumber": "T20261019.0050", "externalID": "am:abc", "status": 5, "ticketType": 2, "completedDate": "2026-10-19T06:22:42Z"})
+
+	prev, err := c.PreviousTicket(ctx, "am:abc")
+	if err != nil {
+		t.Fatalf("PreviousTicket: %v", err)
+	}
+	if want := time.Date(2026, 10, 19, 6, 22, 42, 0, time.UTC); prev == nil || !prev.CompletedAt.Equal(want) || prev.Type != receiver.TicketTypeIncident {
+		t.Errorf("PreviousTicket = %+v, want completed at %v, type Incident", prev, want)
+	}
+}
+
+func TestCreateTicket(t *testing.T) {
+	tests := []struct {
+		name          string
+		ticket        receiver.NewTicket
+		wantProblem   any
+		wantAlertData bool
+	}{
+		{"alert group ticket", receiver.NewTicket{CompanyID: 1, Title: "a", ExternalID: "am:abc", Priority: 1, Status: 1, RecordedAlerts: "aaaa"}, nil, true},
+		{"linked to a problem ticket", receiver.NewTicket{CompanyID: 1, Title: "a", ExternalID: "am:abc", Priority: 1, Status: 1, TicketType: 2, RecordedAlerts: "aaaa", ProblemTicketID: 7}, 7, true},
+		// a problem ticket is not an alert group's, so has neither
+		{"problem ticket", receiver.NewTicket{CompanyID: 1, Title: "a", Priority: 1, Status: 1, TicketType: 3}, nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFakeServer(t)
+			c := newClient(t, f)
+
+			created, err := c.CreateTicket(ctx, tt.ticket)
+			if err != nil {
+				t.Fatalf("CreateTicket: %v", err)
+			}
+
+			stored := f.get("Tickets", int(created.ID))
+			if got := stored["problemTicketId"]; !equal(got, tt.wantProblem) {
+				t.Errorf("stored problemTicketId = %v, want %v", got, tt.wantProblem)
+			}
+			_, hasExternalID := stored["externalID"]
+			_, hasUDFs := stored["userDefinedFields"]
+			if hasExternalID != tt.wantAlertData || hasUDFs != tt.wantAlertData {
+				t.Errorf("stored externalID sent %t, UDFs sent %t; want %t", hasExternalID, hasUDFs, tt.wantAlertData)
+			}
+		})
+	}
+}
+
+func TestUpdateTicketLinksProblemTicket(t *testing.T) {
+	f := newFakeServer(t)
+	c := newClient(t, f)
+	created, _ := c.CreateTicket(ctx, receiver.NewTicket{CompanyID: 1, Title: "a", ExternalID: "am:abc", Priority: 1, Status: 5, TicketType: 2})
+
+	problem := int64(7)
+	if err := c.UpdateTicket(ctx, created.ID, receiver.TicketUpdate{ProblemTicketID: &problem}); err != nil {
+		t.Fatal(err)
+	}
+
+	stored := f.get("Tickets", int(created.ID))
+	if stored["problemTicketId"] != 7 || stored["status"] != 5 {
+		t.Errorf("stored ticket = %v, want linked to 7 and still complete", stored)
+	}
+}
+
+func TestValidateChecksProblemCompany(t *testing.T) {
+	id := func(v int64) *int64 { return &v }
+	tests := []struct {
+		name    string
+		company *int64
+		want    string
+	}{
+		{"unset", nil, ""},
+		{"active", id(1), ""},
+		{"unknown", id(99), "problem company 99 does not exist"},
+		{"inactive", id(2), "problem company 2 is inactive"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := validationServer(t)
+			f.add("Companies", entity{"id": 2, "isActive": false})
+			c := newClientWith(t, f, autotask.Options{})
+
+			err := c.Validate(ctx, goodChecks(), 1, tt.company, 0)
+			switch {
+			case tt.want == "" && err != nil:
+				t.Errorf("Validate: %v", err)
+			case tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)):
+				t.Errorf("Validate error = %v, want one mentioning %q", err, tt.want)
 			}
 		})
 	}

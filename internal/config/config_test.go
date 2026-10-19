@@ -569,3 +569,65 @@ func TestCheckTZ(t *testing.T) {
 		}
 	})
 }
+
+func TestProblemSettings(t *testing.T) {
+	incident := minimalYAML + "  type: 2\n"
+	id := func(v int64) *int64 { return &v }
+
+	tests := []struct {
+		name         string
+		yaml         string
+		env          map[string]string
+		args         []string
+		wantLookback time.Duration
+		wantCompany  *int64
+		wantQueue    int
+		wantErr      string
+	}{
+		{name: "disabled by default", yaml: minimalYAML},
+		{name: "from file", yaml: incident + "problem:\n  lookback: 24h\n  company: 175\n  queue: 29\n", wantLookback: 24 * time.Hour, wantCompany: id(175), wantQueue: 29},
+		// company 0 is the Autotask instance's own company
+		{name: "own company from flag", yaml: incident, args: []string{"--problem.lookback", "1h", "--problem.company", "0"}, wantLookback: time.Hour, wantCompany: id(0)},
+		{name: "own company from env", yaml: incident, env: map[string]string{"AM_AUTOTASK_PROBLEM_LOOKBACK": "1h", "AM_AUTOTASK_PROBLEM_COMPANY": "0"}, wantLookback: time.Hour, wantCompany: id(0)},
+		{name: "ticket type not Incident", yaml: minimalYAML + "problem:\n  lookback: 1h\n", wantErr: "problem.lookback requires ticket.type 2 (Incident), not 5"},
+		{name: "negative lookback", yaml: incident + "problem:\n  lookback: -1h\n", wantErr: "problem.lookback must not be negative"},
+		{name: "company without lookback", yaml: incident + "problem:\n  company: 0\n", wantErr: "require problem.lookback"},
+		{name: "queue without lookback", yaml: incident + "problem:\n  queue: 29\n", wantErr: "require problem.lookback"},
+		{name: "company not a number", yaml: incident + "problem:\n  lookback: 1h\n  company: abc\n", wantErr: `problem.company "abc" is not an ID`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+
+			cfg, err := loadArgs(append([]string{"--config", writeFile(t, "c.yaml", tt.yaml)}, tt.args...))
+
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("err = %v, want one containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := cfg.Receiver
+			if r.Lookback != tt.wantLookback || r.ProblemQueueID != tt.wantQueue {
+				t.Errorf("lookback/queue = %v/%d, want %v/%d", r.Lookback, r.ProblemQueueID, tt.wantLookback, tt.wantQueue)
+			}
+			if (r.ProblemCompanyID == nil) != (tt.wantCompany == nil) || (r.ProblemCompanyID != nil && *r.ProblemCompanyID != *tt.wantCompany) {
+				t.Errorf("ProblemCompanyID = %v, want %v", r.ProblemCompanyID, tt.wantCompany)
+			}
+		})
+	}
+}
+
+func TestPicklistChecksIncludeProblemQueue(t *testing.T) {
+	cfg := load(t, "--config", writeFile(t, "c.yaml", minimalYAML+"  type: 2\nproblem:\n  lookback: 1h\n  queue: 29\n"))
+
+	want := autotask.PicklistCheck{Entity: "Tickets", Field: "queueID", Value: 29, Setting: "problem.queue"}
+	if !slices.Contains(cfg.PicklistChecks(), want) {
+		t.Errorf("missing check %+v", want)
+	}
+}

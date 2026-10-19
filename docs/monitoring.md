@@ -20,9 +20,9 @@ All am-autotask metrics are prefixed `am_autotask_`. The standard Go runtime (`g
 | Metric | Type | Labels | Meaning |
 | --- | --- | --- | --- |
 | `am_autotask_notifications_total` | counter | `result` | Webhook requests by result: `handled`, `unauthorized` (missing or wrong bearer token), `invalid` (malformed or unsupported webhook version), `temporary_failure` (answered 500 so Alertmanager retries, including while still starting up) and `permanent_failure` (acknowledged without reaching Autotask). |
-| `am_autotask_tickets_created_total` | counter | | Autotask tickets created. |
+| `am_autotask_tickets_created_total` | counter | | Autotask tickets created, including problem tickets. |
 | `am_autotask_notes_created_total` | counter | | Ticket notes created, including notes on duplicate and orphaned tickets. |
-| `am_autotask_autotask_errors_total` | counter | `operation`, `kind` | Failed Autotask requests made while handling notifications. `operation` is one of `open_tickets`, `previous_ticket`, `open_alert_tickets`, `create_ticket`, `create_note` or `update_ticket`; `kind` is `temporary`, `permanent` or `rate_limited` (HTTP 429). Company selector reloads are not counted here; see `am_autotask_company_selectors_age_seconds`. |
+| `am_autotask_autotask_errors_total` | counter | `operation`, `kind` | Failed Autotask requests made while handling notifications. `operation` is one of `open_tickets`, `previous_ticket`, `get_ticket`, `open_alert_tickets`, `create_ticket`, `create_note` or `update_ticket`; `kind` is `temporary`, `permanent` or `rate_limited` (HTTP 429). Company selector reloads are not counted here; see `am_autotask_company_selectors_age_seconds`. |
 | `am_autotask_alerts_moved_total` | counter | | Alerts moved off orphaned tickets onto their alert group's current ticket. |
 | `am_autotask_orphaned_tickets_completed_total` | counter | | Orphaned tickets completed because all of their alerts moved. |
 | `am_autotask_company_selectors_age_seconds` | gauge | | Time since company selectors were last loaded from Autotask. It drops back to zero on each successful reload, every `company.refresh` (default 15 minutes), and keeps growing while reloads fail. It is zero until the first load. |
@@ -30,7 +30,8 @@ All am-autotask metrics are prefixed `am_autotask_`. The standard Go runtime (`g
 | `am_autotask_catchall_tickets_total` | counter | `reason` | Tickets raised against the catch-all company: `unmatched` (no company's selectors matched the alert group) or `ambiguous` (more than one company's did). |
 | `am_autotask_ticket_priority_changes_total` | counter | `direction` | Ticket priorities changed to follow their alert group's severity, `raised` or `lowered`. Only counted when `ticket.appliedpriorityudf` is set. |
 | `am_autotask_ticket_priority_overrides_total` | counter | | Tickets found with a priority a person changed, which then no longer follows severity. Counted once per ticket. A high rate compared with `am_autotask_ticket_priority_changes_total` suggests `ticket.priorities` or `ticket.severityorder` doesn't match how the service desk prioritises. |
-| `am_autotask_template_errors_total` | counter | `template` | [Ticket templates](../README.md#ticket-templates) from the templates file that failed on a notification, so the built-in wording was used instead: `ticket.title`, `ticket.description`, `note.title` or `note.description`. Always zero without a templates file. |
+| `am_autotask_template_errors_total` | counter | `template` | [Ticket templates](../README.md#ticket-templates) from the templates file that failed on a notification, so the built-in wording was used instead: `ticket.title`, `ticket.description`, `note.title`, `note.description`, `problem.title` or `problem.description`. Always zero without a templates file. |
+| `am_autotask_recurrences_total` | counter | `outcome` | [Recurrences](../README.md#recurrences): tickets raised soon after their alert group's previous ticket was completed, by outcome: `followed` (linked to the previous ticket's open problem ticket), `raised` (a new problem ticket was raised) or `failed` (left for a person to link; see [AmAutotaskRecurrenceLinkFailed](#amautotaskrecurrencelinkfailed)). Always zero unless `problem.lookback` is set. |
 | `am_autotask_ready` | gauge | | `1` once startup has completed and notifications are being handled, otherwise `0`. |
 | `am_autotask_autotask_request_duration_seconds` | histogram | `operation` | Duration of Autotask operations made while handling notifications, with the same `operation` values as `am_autotask_autotask_errors_total`. An operation includes all of its pages and any read back, such as `create_ticket` reading the new ticket's number. |
 
@@ -61,6 +62,9 @@ sum by (reason) (increase(am_autotask_catchall_tickets_total[1d]))
 sum by (direction) (increase(am_autotask_ticket_priority_changes_total[1d]))
 increase(am_autotask_ticket_priority_overrides_total[1d])
 
+# recurrences per day, by outcome
+sum by (outcome) (increase(am_autotask_recurrences_total[1d]))
+
 # deliveries Alertmanager could not make to webhook receivers, including am-autotask
 sum(rate(alertmanager_notifications_failed_total{integration="webhook"}[5m]))
 ```
@@ -78,7 +82,7 @@ Its rows are:
 - **Status**: am-autotask's own firing and pending alerts from the [alerting rules](#alerting-rules), readiness, the age of the company selectors and how many companies' selectors are valid. The alert list needs Grafana to read the rules from the data source, which it does for Prometheus and Mimir.
 - **Notifications**: notifications by result, the share failing, and Alertmanager's failed webhook deliveries. Like the query above, the last counts every webhook receiver.
 - **Autotask**: request duration and errors by operation.
-- **Tickets** (collapsed): tickets and notes created, catch-all tickets, priority changes compared with overrides, orphaned tickets, and ticket templates that failed. These don't need anyone to act on them straight away; use them to tune company selectors and `ticket.priorities`.
+- **Tickets** (collapsed): tickets and notes created, catch-all tickets, priority changes compared with overrides, orphaned tickets, recurrences by outcome, and ticket templates that failed. These don't need anyone to act on them straight away; use them to tune company selectors and `ticket.priorities`.
 
 When an alert fires, open its runbook below and use the dashboard to see when the problem started and how far it reaches.
 
@@ -129,6 +133,7 @@ The [alerting rules workflow](../.github/workflows/rules.yml) runs these checks 
 | [AmAutotaskUnmatchedAlertGroups](#amautotaskunmatchedalertgroups) | info | An alert group matched no company in the last hour. |
 | [AmAutotaskInvalidCompanySelectors](#amautotaskinvalidcompanyselectors) | warning | A company's selectors have failed to parse for 15 minutes. |
 | [AmAutotaskTemplateErrors](#amautotasktemplateerrors) | warning | A ticket template from the templates file failed in the last hour. |
+| [AmAutotaskRecurrenceLinkFailed](#amautotaskrecurrencelinkfailed) | warning | A recurrence could not be linked to a problem ticket in the last hour. |
 
 ### Routing these alerts
 
@@ -266,3 +271,12 @@ A block in the templates file failed on a real notification, although it passed 
 - Search am-autotask's logs for `ticket template failed`; each entry names the template and the error, such as an index past the end of `.Alerts` or a function given the wrong type.
 - Save the notification that failed (Alertmanager's webhook payload) as JSON and reproduce the error with `am-autotask templates --templates <file> --notification <payload>`.
 - Fix the block so it handles that notification, for example by checking a list's length before indexing it, and restart am-autotask.
+
+### AmAutotaskRecurrenceLinkFailed
+
+A ticket was raised soon after its alert group's previous ticket was completed, but linking it to a problem ticket failed. The ticket itself was raised, and has a note titled `Not linked to a problem ticket` naming the previous ticket, any problem ticket already raised, and the error. am-autotask only links a recurrence when its ticket is raised, so it won't try again.
+
+- Search am-autotask's logs for `linking recurrence to a problem ticket failed`; each entry names the ticket, the previous ticket and the error.
+- Link the ticket to the problem ticket by hand in Autotask, raising one first if the note names none. Link the previous ticket too if it is an Incident and not already linked to a problem ticket.
+- If Autotask rejected the link, check the problem ticket: a problem ticket holds at most 500 incidents, and only Incident tickets can be linked, so `ticket.type` must be 2.
+- If the error is temporary, such as a timeout or rate limiting, see [AmAutotaskTemporaryFailures](#amautotasktemporaryfailures) and [AmAutotaskRateLimited](#amautotaskratelimited).

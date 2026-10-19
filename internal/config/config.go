@@ -107,6 +107,10 @@ func AddFlags(f *pflag.FlagSet) {
 	f.Duration("ticket.duein", 0, "due date of new tickets relative to creation (optional)")
 	f.Int("ticket.resolvedstatus", 5, "status ID set when the whole alert group resolves; 0 leaves the status unchanged")
 
+	f.Duration("problem.lookback", 0, "link a new ticket to a problem ticket when its alert group's previous ticket was completed within this long; 0 disables (optional, requires ticket.type 2, Incident)")
+	f.Var(&optionalID{}, "problem.company", "ID of the company problem tickets are raised against, which may be 0 for your own company; default the new ticket's company (optional)")
+	f.Int("problem.queue", 0, "queue ID of problem tickets; default the new ticket's queue (optional)")
+
 	f.Int("note.type", 1, "note type ID of ticket notes")
 	f.Int("note.publish", 2, "publish (visibility) ID of ticket notes")
 
@@ -183,6 +187,8 @@ func FromFlags(f *pflag.FlagSet) (Config, error) {
 			WorkType:          k.Int("ticket.worktype"),
 			DueIn:             k.Duration("ticket.duein"),
 			ResolvedStatus:    k.Int("ticket.resolvedstatus"),
+			Lookback:          k.Duration("problem.lookback"),
+			ProblemQueueID:    k.Int("problem.queue"),
 			NoteType:          k.Int("note.type"),
 			NotePublish:       k.Int("note.publish"),
 		},
@@ -195,6 +201,15 @@ func FromFlags(f *pflag.FlagSet) (Config, error) {
 	} else if _, err := strconv.ParseInt(v, 10, 64); err != nil {
 		errs = append(errs, fmt.Errorf("company.catchall %q is not an ID", v))
 	}
+
+	if v := k.String("problem.company"); v != "" {
+		if id, err := strconv.ParseInt(v, 10, 64); err != nil {
+			errs = append(errs, fmt.Errorf("problem.company %q is not an ID", v))
+		} else {
+			cfg.Receiver.ProblemCompanyID = &id
+		}
+	}
+	errs = append(errs, problemErrors(cfg.Receiver)...)
 
 	required := []struct {
 		key string
@@ -234,6 +249,23 @@ func FromFlags(f *pflag.FlagSet) (Config, error) {
 		return Config{}, &invalidError{errs}
 	}
 	return cfg, nil
+}
+
+// problemErrors checks the recurrence settings: problem tickets can only link
+// Incident tickets, and the other problem settings do nothing without a
+// lookback period.
+func problemErrors(r receiver.Options) []error {
+	switch {
+	case r.Lookback < 0:
+		return []error{errors.New("problem.lookback must not be negative")}
+	case r.Lookback == 0:
+		if r.ProblemCompanyID != nil || r.ProblemQueueID != 0 {
+			return []error{errors.New("problem.company and problem.queue require problem.lookback")}
+		}
+	case r.TicketType != receiver.TicketTypeIncident:
+		return []error{fmt.Errorf("problem.lookback requires ticket.type %d (Incident), not %d, as Autotask only links incidents to problem tickets", receiver.TicketTypeIncident, r.TicketType)}
+	}
+	return nil
 }
 
 // severityOrderErrors checks the severity order ranks exactly the severities
@@ -423,6 +455,7 @@ func (c Config) PicklistChecks() []autotask.PicklistCheck {
 		{"Tickets", "ticketType", "ticket.type", r.TicketType},
 		{"Tickets", "source", "ticket.source", r.Source},
 		{"Tickets", "queueID", "ticket.queue", r.QueueID},
+		{"Tickets", "queueID", "problem.queue", r.ProblemQueueID},
 		{"Tickets", "issueType", "ticket.issuetype", r.IssueType},
 		{"Tickets", "subIssueType", "ticket.subissuetype", r.SubIssueType},
 		{"Tickets", "ticketCategory", "ticket.category", r.Category},

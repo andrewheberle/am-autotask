@@ -211,6 +211,9 @@ func TestPreviewRendersEveryTemplate(t *testing.T) {
 		"note.title":         "T20261019.0001: 2/1",
 		"ticket.description": "Host is not responding\n",
 		"note.description":   "Firing (2):\n",
+		// titled from the ticket title as the templates render it
+		"problem.title":       `Repeated alert: Host is not responding {tenant_id="example"}`,
+		"problem.description": "This alert group fired again soon after its previous ticket, T20261019.0001, was completed, raising T20261019.0002.",
 	}
 	for name, prefix := range want {
 		if !strings.HasPrefix(got[name], prefix) {
@@ -244,5 +247,24 @@ func TestTimesAreShownInTheTemplatesTimeZone(t *testing.T) {
 	}
 	if notes := at.notesFor(orphan.ID); len(notes) != 1 || !strings.Contains(notes[0].Description, want) {
 		t.Errorf("moved alerts note should contain %q: %+v", want, notes)
+	}
+}
+
+func TestProblemTemplatesCanBeOverridden(t *testing.T) {
+	at := newFakeAutotask()
+	opts := recurrenceOptions(nil)
+	opts.Templates = mustTemplates(t, `{{define "problem.title"}}Investigate {{.TicketNumber}} after {{.PreviousTicketNumber}}{{end}}`, time.UTC)
+	r := newReceiver(t, at, opts)
+	addPrevious(at, receiver.TicketTypeIncident, 0, time.Hour)
+
+	handle(t, r, notification(hostAlert("aaaa", "firing", "web1")))
+
+	problem := problemsRaised(at)[0]
+	if want := "Investigate T20261017.0002 after T20261017.0001"; problem.Title != want {
+		t.Errorf("problem ticket title = %q, want %q", problem.Title, want)
+	}
+	// a template cannot remove the system notice naming the linked tickets
+	if !strings.HasPrefix(problem.Description, "Linked tickets: ") {
+		t.Errorf("problem ticket description should start with its system notice:\n%s", problem.Description)
 	}
 }

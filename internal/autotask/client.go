@@ -242,17 +242,23 @@ type ticketItem struct {
 	Status            int       `json:"status"`
 	ExternalID        string    `json:"externalID"`
 	Priority          int       `json:"priority"`
+	TicketType        int       `json:"ticketType"`
+	ProblemTicketID   int64     `json:"problemTicketId"`
+	CompletedDate     time.Time `json:"completedDate"`
 	UserDefinedFields udfValues `json:"userDefinedFields"`
 }
 
 func (c *Client) toTicket(t ticketItem) receiver.Ticket {
 	ticket := receiver.Ticket{
-		ID:             t.ID,
-		Number:         t.TicketNumber,
-		Status:         t.Status,
-		ExternalID:     t.ExternalID,
-		RecordedAlerts: t.UserDefinedFields.get(c.opts.RecordedAlertsUDF),
-		Priority:       t.Priority,
+		ID:              t.ID,
+		Number:          t.TicketNumber,
+		Status:          t.Status,
+		ExternalID:      t.ExternalID,
+		RecordedAlerts:  t.UserDefinedFields.get(c.opts.RecordedAlertsUDF),
+		Priority:        t.Priority,
+		Type:            t.TicketType,
+		ProblemTicketID: t.ProblemTicketID,
+		CompletedAt:     t.CompletedDate,
 	}
 	if c.opts.AppliedPriorityUDF != "" {
 		ticket.AppliedPriority = t.UserDefinedFields.get(c.opts.AppliedPriorityUDF)
@@ -330,6 +336,7 @@ type ticketBody struct {
 	SubIssueType      int        `json:"subIssueType,omitempty"`
 	TicketCategory    int        `json:"ticketCategory,omitempty"`
 	BillingCodeID     int        `json:"billingCodeID,omitempty"` // the work type
+	ProblemTicketID   int64      `json:"problemTicketId,omitempty"`
 	DueDateTime       string     `json:"dueDateTime,omitempty"`
 	UserDefinedFields []udfValue `json:"userDefinedFields,omitempty"`
 }
@@ -339,25 +346,27 @@ type createResponse struct {
 }
 
 // CreateTicket implements [receiver.Autotask]. Autotask only returns the new
-// ID, so the ticket is read back for its number.
+// ID, so the ticket is read back for its number. A ticket without an external
+// ID, such as a problem ticket, is not an alert group's and gets no UDFs.
 func (c *Client) CreateTicket(ctx context.Context, t receiver.NewTicket) (receiver.Ticket, error) {
 	body := ticketBody{
-		CompanyID:      &t.CompanyID,
-		Title:          t.Title,
-		Description:    t.Description,
-		ExternalID:     &t.ExternalID,
-		Priority:       t.Priority,
-		Status:         t.Status,
-		TicketType:     t.TicketType,
-		Source:         t.Source,
-		QueueID:        t.QueueID,
-		IssueType:      t.IssueType,
-		SubIssueType:   t.SubIssueType,
-		TicketCategory: t.Category,
-		BillingCodeID:  t.WorkType,
-		UserDefinedFields: []udfValue{
-			{Name: c.opts.RecordedAlertsUDF, Value: &t.RecordedAlerts},
-		},
+		CompanyID:       &t.CompanyID,
+		Title:           t.Title,
+		Description:     t.Description,
+		Priority:        t.Priority,
+		Status:          t.Status,
+		TicketType:      t.TicketType,
+		Source:          t.Source,
+		QueueID:         t.QueueID,
+		IssueType:       t.IssueType,
+		SubIssueType:    t.SubIssueType,
+		TicketCategory:  t.Category,
+		BillingCodeID:   t.WorkType,
+		ProblemTicketID: t.ProblemTicketID,
+	}
+	if t.ExternalID != "" {
+		body.ExternalID = &t.ExternalID
+		body.UserDefinedFields = []udfValue{{Name: c.opts.RecordedAlertsUDF, Value: &t.RecordedAlerts}}
 	}
 	if c.opts.AppliedPriorityUDF != "" && t.AppliedPriority != "" {
 		body.UserDefinedFields = append(body.UserDefinedFields, udfValue{Name: c.opts.AppliedPriorityUDF, Value: &t.AppliedPriority})
@@ -371,17 +380,36 @@ func (c *Client) CreateTicket(ctx context.Context, t receiver.NewTicket) (receiv
 		return receiver.Ticket{}, fmt.Errorf("creating ticket: %w", err)
 	}
 
-	var created struct {
-		Item *ticketItem `json:"item"`
-	}
-	if err := c.do(ctx, http.MethodGet, c.url("/Tickets/"+strconv.FormatInt(resp.ItemID, 10)), nil, &created); err != nil {
+	created, err := c.Ticket(ctx, resp.ItemID)
+	if err != nil {
 		return receiver.Ticket{}, fmt.Errorf("reading created ticket %d: %w", resp.ItemID, err)
 	}
-	if created.Item == nil {
+	if created == nil {
 		return receiver.Ticket{}, fmt.Errorf("reading created ticket %d: not found", resp.ItemID)
 	}
 
-	return c.toTicket(*created.Item), nil
+	return *created, nil
+}
+
+// Ticket implements [receiver.Autotask].
+func (c *Client) Ticket(ctx context.Context, id int64) (*receiver.Ticket, error) {
+	var resp struct {
+		Item *ticketItem `json:"item"`
+	}
+	err := c.do(ctx, http.MethodGet, c.url("/Tickets/"+strconv.FormatInt(id, 10)), nil, &resp)
+	var apiErr *apiError
+	if errors.As(err, &apiErr) && apiErr.status == http.StatusNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if resp.Item == nil {
+		return nil, nil
+	}
+
+	ticket := c.toTicket(*resp.Item)
+	return &ticket, nil
 }
 
 // UpdateTicket implements [receiver.Autotask].
@@ -392,6 +420,9 @@ func (c *Client) UpdateTicket(ctx context.Context, id int64, u receiver.TicketUp
 	}
 	if u.Priority != nil {
 		body.Priority = *u.Priority
+	}
+	if u.ProblemTicketID != nil {
+		body.ProblemTicketID = *u.ProblemTicketID
 	}
 	if u.RecordedAlerts != nil {
 		body.UserDefinedFields = append(body.UserDefinedFields, udfValue{Name: c.opts.RecordedAlertsUDF, Value: u.RecordedAlerts})

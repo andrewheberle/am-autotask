@@ -169,7 +169,7 @@ func (c *serveCommand) serve(ctx context.Context, cfg config.Config, logger *slo
 		return err
 	}
 
-	if err := client.Validate(ctx, cfg.PicklistChecks(), cfg.Receiver.CatchAllCompanyID, cfg.Receiver.WorkType); err != nil {
+	if err := client.Validate(ctx, cfg.PicklistChecks(), cfg.Receiver.CatchAllCompanyID, cfg.Receiver.ProblemCompanyID, cfg.Receiver.WorkType); err != nil {
 		return fmt.Errorf("configuration does not match Autotask:\n%w", err)
 	}
 

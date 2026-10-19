@@ -30,6 +30,7 @@ type Metrics struct {
 	priorities     *prometheus.CounterVec
 	overrides      prometheus.Counter
 	templates      *prometheus.CounterVec
+	recurrences    *prometheus.CounterVec
 	duration       *prometheus.HistogramVec
 }
 
@@ -90,6 +91,10 @@ func New(opts Options) *Metrics {
 			Namespace: namespace, Name: "template_errors_total",
 			Help: "Ticket templates from the templates file that failed, so the built-in template was used instead, by template.",
 		}, []string{"template"}),
+		recurrences: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace, Name: "recurrences_total",
+			Help: "New tickets raised within the lookback period of their alert group's previous ticket being completed, by outcome (followed an open problem ticket, raised a problem ticket, failed to link).",
+		}, []string{"outcome"}),
 		duration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: namespace, Name: "autotask_request_duration_seconds",
 			Help:    "Duration of Autotask API operations made while handling notifications, including paging, by operation.",
@@ -107,6 +112,9 @@ func New(opts Options) *Metrics {
 	for _, name := range receiver.TemplateNames {
 		m.templates.WithLabelValues(name)
 	}
+	for _, outcome := range []string{receiver.RecurrenceFollowed, receiver.RecurrenceRaised, receiver.RecurrenceFailed} {
+		m.recurrences.WithLabelValues(outcome)
+	}
 
 	selectorCount := func(state string, pick func(valid, invalid int) int) prometheus.Collector {
 		return prometheus.NewGaugeFunc(prometheus.GaugeOpts{
@@ -118,7 +126,7 @@ func New(opts Options) *Metrics {
 
 	m.registry.MustRegister(
 		m.notifications, m.ticketsCreated, m.notesCreated, m.autotaskErrors, m.alertsMoved, m.orphansDone,
-		m.catchAll, m.priorities, m.overrides, m.templates, m.duration,
+		m.catchAll, m.priorities, m.overrides, m.templates, m.recurrences, m.duration,
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: namespace, Name: "company_selectors_age_seconds",
 			Help: "Seconds since company selectors were last loaded from Autotask.",
@@ -176,6 +184,11 @@ func (m *Metrics) TemplateFailed(template string) {
 	m.templates.WithLabelValues(template).Inc()
 }
 
+// Recurrence implements [receiver.Observer].
+func (m *Metrics) Recurrence(outcome string) {
+	m.recurrences.WithLabelValues(outcome).Inc()
+}
+
 // ObserveNotification counts a webhook request by result.
 func (m *Metrics) ObserveNotification(result string) {
 	m.notifications.WithLabelValues(result).Inc()
@@ -221,6 +234,12 @@ func (i *instrumented) PreviousTicket(ctx context.Context, externalID string) (*
 	start := time.Now()
 	t, err := i.at.PreviousTicket(ctx, externalID)
 	return t, i.observe("previous_ticket", start, err)
+}
+
+func (i *instrumented) Ticket(ctx context.Context, id int64) (*receiver.Ticket, error) {
+	start := time.Now()
+	t, err := i.at.Ticket(ctx, id)
+	return t, i.observe("get_ticket", start, err)
 }
 
 func (i *instrumented) OpenAlertTickets(ctx context.Context) ([]receiver.Ticket, error) {

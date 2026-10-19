@@ -13,7 +13,7 @@ Each Alertmanager alert group gets one Autotask ticket, raised against the compa
 - **Choosing the company.** Each company in Autotask can hold one or more *company selectors* in a Company UDF. They are matched against the notification's `groupLabels`. A group matched by no company, or by more than one, is raised against the configured *catch-all company*; an ambiguous match is explained in the ticket description (see [ADR-0002](docs/adr/0002-company-selectors-live-in-autotask.md)).
 - **Notes only on change.** A note is added when an alert fires that the ticket hasn't recorded yet, or a recorded alert resolves. Re-sends with nothing new (for example on `repeat_interval`) add nothing. The fingerprints of recorded alerts are kept in a Ticket UDF.
 - **Resolution.** When every alert in the group has resolved, a final note is added and the ticket is set to `ticket.resolvedstatus` (default 5, *Complete*).
-- **Closed tickets are never reopened.** If a group fires again after its ticket was completed, including when a technician completed it while alerts were still firing, a new ticket is created that references the previous one.
+- **Closed tickets are never reopened.** If a group fires again after its ticket was completed, including when a technician completed it while alerts were still firing, a new ticket is created that references the previous one. With a lookback period, a new ticket raised soon after the previous one was completed is also linked to an Autotask problem ticket; see [Recurrences](#recurrences).
 - **Orphaned tickets are handed over.** Changing route matchers, `group_by` or how routes nest gives the affected groups new group keys, leaving their open tickets behind. Alertmanager then sends the alerts again under the new keys. When a firing alert is still recorded on another group's open ticket, that ticket is orphaned: the alert is noted there as moved, naming its new ticket, and is no longer recorded on it. Once all its alerts have moved, the orphaned ticket is set to `ticket.resolvedstatus`. A new ticket that takes over alerts says which ticket it continues.
 - **Priority follows severity.** Optionally, a ticket's priority rises and falls with its alert group's severity, for example when an Alertmanager inhibition rule mutes a `warning` alert while the matching `critical` one fires. A person changing the priority takes over from then on. See [Priority and severity](#priority-and-severity).
 - **Retries.** Temporary Autotask failures (timeouts, 5xx, 429) return HTTP 500 so Alertmanager retries the notification. Permanent failures (Autotask rejecting the request) are logged with the payload and acknowledged so they are not retried forever.
@@ -27,13 +27,13 @@ See [GLOSSARY.md](GLOSSARY.md) for the terms used here.
 - **Runbooks.** An alert's `runbook_url` annotation is shown so the service desk can follow it. A runbook shared by every alert is shown once, near the top of the description as `Runbook: <url>`; otherwise each alert's runbook is shown under that alert. Notes show the runbooks of newly firing alerts, unless it is the runbook every alert shares, and never for resolved or moved alerts. The value is shown as written, without checking that it is a valid URL.
 - **Notes.** Titled with the alert name and the number of alerts that fired and resolved, for example `HostDown: 1 firing, 0 resolved`, or `HostDown resolved: 0 firing, 2 resolved` when the whole group has resolved, and listing each alert. When the ticket's priority follows severity, a note also says when the priority was raised or lowered, or that a person changed it.
 
-- **System notices.** Explanations of something am-autotask did or detected come first in a description or note: a ticket raised against the catch-all company because several companies matched, the group's previous ticket, the orphaned tickets a ticket continues, alerts no longer recorded individually, and priority changes. [Ticket templates](#ticket-templates) cannot remove them (see [ADR-0005](docs/adr/0005-system-notices-stay-outside-ticket-templates.md)).
+- **System notices.** Explanations of something am-autotask did or detected come first in a description or note: a ticket raised against the catch-all company because several companies matched, the group's previous ticket, the orphaned tickets a ticket continues, alerts no longer recorded individually, priority changes, and the problem ticket a ticket is linked to or the tickets a problem ticket links. [Ticket templates](#ticket-templates) cannot remove them (see [ADR-0005](docs/adr/0005-system-notices-stay-outside-ticket-templates.md)).
 
 Text longer than Autotask allows is cut short, ending with `… (truncated)`.
 
 ## Ticket templates
 
-The wording of ticket titles, ticket descriptions and change notes (the notes recording alerts firing and resolving) can be replaced with [Go templates](https://pkg.go.dev/text/template). Set `templates` to a file that defines any of these blocks:
+The wording of ticket titles, ticket descriptions, change notes (the notes recording alerts firing and resolving) and [problem tickets](#recurrences) can be replaced with [Go templates](https://pkg.go.dev/text/template). Set `templates` to a file that defines any of these blocks:
 
 | Block | Data | Used for |
 | --- | --- | --- |
@@ -41,6 +41,8 @@ The wording of ticket titles, ticket descriptions and change notes (the notes re
 | `ticket.description` | Ticket | Description of a new ticket, after any system notices. |
 | `note.title` | Note | Title of a change note. Made a single line. |
 | `note.description` | Note | Description of a change note, after any system notices. |
+| `problem.title` | Problem | Title of a problem ticket raised for a recurrence. Made a single line. |
+| `problem.description` | Problem | Description of a problem ticket, after any system notices. |
 
 A block the file does not define keeps its [built-in definition](internal/receiver/templates/default.tmpl), so a file can change just the title:
 
@@ -62,10 +64,12 @@ These fields are a stable interface: renaming or removing one is a breaking chan
 | `.ExternalURL` | All | Alertmanager's external URL. |
 | `.AlertmanagerURL` | All | Link to the receiver's alerts in Alertmanager, or empty without an external URL. |
 | `.Severity` | All | The alert group's severity when the template is executed. For a ticket that is when it was raised; it does not change with the ticket's priority later. |
-| `.Alerts` | Ticket | The firing alerts. |
+| `.Alerts` | Ticket, Problem | The firing alerts. For a problem ticket, those of the new ticket. |
 | `.Fired`, `.Resolved` | Note | Alerts that fired and resolved since the last note. |
 | `.GroupResolved` | Note | Set when the whole alert group has resolved. |
-| `.TicketNumber` | Note | The ticket's number, e.g. `T20261019.0001`. |
+| `.TicketNumber` | Note, Problem | The ticket's number, e.g. `T20261019.0001`. For a problem ticket, the new ticket's. |
+| `.TicketTitle` | Problem | The new ticket's title, as its template rendered it. |
+| `.PreviousTicketNumber` | Problem | The number of the alert group's previous ticket. |
 
 Each alert has `.Name` (its `alertname` label), `.Status`, `.Labels`, `.Annotations`, `.StartsAt`, `.EndsAt` (zero while firing; check with `.EndsAt.IsZero`), `.GeneratorURL` and `.Fingerprint`.
 
@@ -96,7 +100,7 @@ The templates file is read at startup; restart to apply changes. To see what the
 am-autotask templates --templates templates.tmpl [--notification webhook.json]
 ```
 
-This prints every block rendered for a built-in sample notification, or for an Alertmanager webhook payload saved as JSON, treating its firing alerts as a new ticket and all its alerts as a change note. System notices are not shown. `templates` is also read from `--config` and `AM_AUTOTASK_TEMPLATES`.
+This prints every block rendered for a built-in sample notification, or for an Alertmanager webhook payload saved as JSON, treating its firing alerts as a new ticket, all its alerts as a change note, and its ticket as a recurrence raising a problem ticket. System notices are not shown. `templates` is also read from `--config` and `AM_AUTOTASK_TEMPLATES`.
 
 ## Autotask setup
 
@@ -243,6 +247,9 @@ Each secret can be given directly or as a path to a file containing it, which su
 | `ticket.worktype` | | Work type ID of new tickets, sent as the ticket's `billingCodeID`. Optional; when unset none is sent, and Autotask or the ticket category decides. Set only when a ticket is created, so a work type changed by hand is kept. |
 | `ticket.duein` | | Due date of new tickets relative to creation, e.g. `4h`. Optional, but Autotask requires a due date unless the ticket category supplies one. |
 | `ticket.resolvedstatus` | `5` (*Complete*) | Status ID set when the whole group resolves. `0` leaves the status unchanged. |
+| `problem.lookback` | | How soon after a group's previous ticket was completed a new ticket counts as a [recurrence](#recurrences), e.g. `72h`. Optional; `0` or unset disables recurrences. Requires `ticket.type` 2 (*Incident*). |
+| `problem.company` | | ID of the company problem tickets are raised against. Optional; `0` is your own company. When unset, a problem ticket is raised against the new ticket's company. |
+| `problem.queue` | | Queue ID of problem tickets. Optional; when unset, a problem ticket takes the new ticket's queue. |
 | `note.type` | `1` (*Task Summary*) | Note type ID of ticket notes. |
 | `note.publish` | `2` (*Internal Project Team*) | Publish (visibility) ID of ticket notes. |
 | `templates` | | Path to a file of [ticket templates](#ticket-templates). Optional; the built-in wording applies when unset. |
@@ -295,6 +302,31 @@ ticket:
   appliedpriorityudf: Alertmanager Applied Priority
   defaultpriority: 3
 ```
+
+## Recurrences
+
+Closed tickets are never reopened. When an alert group fires again soon after its ticket was completed, set `problem.lookback` to link the new ticket and the previous one through an Autotask problem ticket, so the service desk can see they share a cause. The new ticket is a recurrence when the group's most recent completed ticket was completed within the lookback period. Only that ticket counts, and only tickets of the same alert group.
+
+- **The previous ticket is linked to an open problem ticket.** The new ticket is created linked to the same problem ticket, and its description says so.
+- **Otherwise**, a problem ticket is raised and both tickets are linked to it. The new ticket gets a note naming the problem ticket. The previous ticket stays complete; linking it does not reopen it.
+- **The previous ticket's problem ticket is complete.** A new problem ticket is raised, but the previous ticket stays linked to the completed one, which the new problem ticket's description names.
+- **The previous ticket is not an Incident**, for example because it was raised before `ticket.type` was changed. Only the new ticket is linked, and the problem ticket's description names the previous ticket.
+
+A problem ticket is titled `Repeated alert:` followed by the new ticket's title, and its description says which tickets it links, then describes the alert group as the new ticket does. Both can be changed with the `problem.title` and `problem.description` [ticket templates](#ticket-templates). It takes the new ticket's priority, status, source, issue type, sub-issue type, category, work type and due date when it is raised, and its company and queue unless `problem.company` and `problem.queue` are set. After that am-autotask leaves it alone: it adds no notes to it and never changes its priority or status, and completing it does not complete the tickets linked to it.
+
+Autotask only links Incident tickets to a problem ticket, so `problem.lookback` requires `ticket.type` 2 (*Incident*), and am-autotask never changes a ticket's type. A problem ticket can hold up to 500 incidents.
+
+If linking fails, the new ticket is still raised, and gets a note titled `Not linked to a problem ticket` explaining what to link by hand. The failure is logged and counted in `am_autotask_recurrences_total`. am-autotask only links a recurrence when its ticket is raised, so it won't try again. See [ADR-0006](docs/adr/0006-recurrences-link-through-problem-tickets.md).
+
+```yaml
+ticket:
+  type: 2
+problem:
+  lookback: 72h
+  queue: 29
+```
+
+A recurrence costs a few more Autotask requests: one to read the previous ticket's problem ticket, if it has one, and five to raise a problem ticket (creating it and reading back its number, linking the two tickets, and the note on the new ticket).
 
 ## Tracing
 
@@ -354,7 +386,7 @@ docker run -v ./config.yaml:/etc/am-autotask/config.yaml \
 | `POST /webhook` | Alertmanager webhook receiver. Requires `Authorization: Bearer <webhook.token>`. |
 | `GET /healthz` | Always `200` while the process is running. |
 | `GET /readyz` | `200` once Autotask has been reached, configuration validated and company selectors loaded. Until then notifications are answered with `500`, so Alertmanager retries them. |
-| `GET /metrics` | Prometheus metrics, prefixed `am_autotask_`: notifications by result, tickets and notes created, alerts moved off orphaned tickets and orphaned tickets completed, tickets raised against the catch-all company, Autotask errors and request durations by operation, ticket templates that failed, readiness, and the age and validity of the company selectors. See [Monitoring](docs/monitoring.md) for what they mean, ready-made alerting rules and a Grafana dashboard. |
+| `GET /metrics` | Prometheus metrics, prefixed `am_autotask_`: notifications by result, tickets and notes created, alerts moved off orphaned tickets and orphaned tickets completed, tickets raised against the catch-all company, Autotask errors and request durations by operation, ticket templates that failed, recurrences by outcome, readiness, and the age and validity of the company selectors. See [Monitoring](docs/monitoring.md) for what they mean, ready-made alerting rules and a Grafana dashboard. |
 
 ## Limitations
 

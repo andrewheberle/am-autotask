@@ -179,3 +179,12 @@ groups:
           summary: Ticket templates are failing
           description: The {{ $labels.template }} template on {{ $labels.instance }} failed in the last hour, so the built-in wording was used instead.
           runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotasktemplateerrors
+
+      - alert: AmAutotaskRecurrenceLinkFailed
+        expr: sum by (instance) (increase(am_autotask_recurrences_total{job="am-autotask", outcome="failed"}[1h])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: Recurring tickets were not linked to a problem ticket
+          description: Tickets raised on {{ $labels.instance }} in the last hour soon after their alert group's previous ticket was completed could not be linked to a problem ticket, and need linking by hand.
+          runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskrecurrencelinkfailed
