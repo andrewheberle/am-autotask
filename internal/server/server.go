@@ -36,9 +36,41 @@ const (
 	ResultPermanent    = "permanent_failure"
 )
 
+// Results of forwarding a notification to the leader, reported to
+// Options.ObserveForward.
+const (
+	// ForwardDelivered means the leader answered with success.
+	ForwardDelivered = "delivered"
+	// ForwardLeaderError means the leader answered with an error, which is
+	// passed back so Alertmanager retries.
+	ForwardLeaderError = "leader_error"
+	// ForwardNoLeader means no replica holds the lease.
+	ForwardNoLeader = "no_leader"
+	// ForwardUnreachable means the leader could not be reached.
+	ForwardUnreachable = "unreachable"
+)
+
+// ForwardResults lists every forwarding result.
+var ForwardResults = []string{ForwardDelivered, ForwardLeaderError, ForwardNoLeader, ForwardUnreachable}
+
+// ForwardedHeader marks a notification forwarded by a standby, so a replica
+// that is no longer the leader rejects it rather than forwarding it again.
+const ForwardedHeader = "X-Am-Autotask-Forwarded"
+
 // Handler applies a notification. It is satisfied by [receiver.Receiver].
 type Handler interface {
 	Handle(ctx context.Context, n receiver.Notification) error
+}
+
+// Leadership decides which replica handles notifications. It is satisfied
+// by [leader.Elector].
+type Leadership interface {
+	// Hold returns a context for handling a notification as leader,
+	// cancelled if leadership is lost, and a function to call when done. ok
+	// is false if this replica is not the leader.
+	Hold(ctx context.Context) (held context.Context, done func(), ok bool)
+	// LeaderAddress returns the leader's host:port, or "" if there is none.
+	LeaderAddress() string
 }
 
 // Options configures the server.
@@ -58,6 +90,16 @@ type Options struct {
 	// Propagators read the trace context Alertmanager sends. Default the
 	// global propagators.
 	Propagators propagation.TextMapPropagator
+
+	// Leadership, when set, limits handling to the leader: other replicas
+	// forward notifications to it.
+	Leadership Leadership
+	// ForwardClient sends forwarded notifications. Default
+	// [http.DefaultClient].
+	ForwardClient *http.Client
+	// ObserveForward, when set, is called with the result of every
+	// notification forwarded to the leader.
+	ObserveForward func(result string)
 }
 
 type server struct {
@@ -83,6 +125,12 @@ func New(h Handler, opts Options) http.Handler {
 	}
 	if opts.Propagators == nil {
 		opts.Propagators = otel.GetTextMapPropagator()
+	}
+	if opts.ForwardClient == nil {
+		opts.ForwardClient = http.DefaultClient
+	}
+	if opts.ObserveForward == nil {
+		opts.ObserveForward = func(string) {}
 	}
 	s := &server{h: h, opts: opts}
 
@@ -145,7 +193,18 @@ func (s *server) webhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = s.h.Handle(r.Context(), n)
+	ctx := r.Context()
+	if s.opts.Leadership != nil {
+		held, done, ok := s.opts.Leadership.Hold(ctx)
+		if !ok {
+			s.forward(w, r, body)
+			return
+		}
+		defer done()
+		ctx = held
+	}
+
+	err = s.h.Handle(ctx, n)
 	switch {
 	case err == nil:
 		s.opts.Observe(ResultHandled)
@@ -161,4 +220,54 @@ func (s *server) webhook(w http.ResponseWriter, r *http.Request) {
 		s.opts.Observe(ResultTemporary)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+// forward passes a notification to the leader and its answer back to
+// Alertmanager. Any failure is a 5xx, so Alertmanager retries.
+func (s *server) forward(w http.ResponseWriter, r *http.Request, body []byte) {
+	ctx := r.Context()
+	if r.Header.Get(ForwardedHeader) != "" {
+		// the sender thought this replica led, but leadership has moved
+		s.opts.Observe(ResultTemporary)
+		http.Error(w, "not the leader", http.StatusServiceUnavailable)
+		return
+	}
+
+	addr := s.opts.Leadership.LeaderAddress()
+	if addr == "" {
+		s.opts.ObserveForward(ForwardNoLeader)
+		s.opts.Logger.WarnContext(ctx, "no leader to forward the notification to; Alertmanager will retry")
+		http.Error(w, "no leader", http.StatusServiceUnavailable)
+		return
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+addr+"/webhook", bytes.NewReader(body))
+	if err != nil {
+		s.opts.ObserveForward(ForwardUnreachable)
+		http.Error(w, "forwarding to leader: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	req.Header.Set("Authorization", r.Header.Get("Authorization"))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(ForwardedHeader, "1")
+
+	resp, err := s.opts.ForwardClient.Do(req)
+	if err != nil {
+		s.opts.ObserveForward(ForwardUnreachable)
+		s.opts.Logger.WarnContext(ctx, "forwarding the notification to the leader failed; Alertmanager will retry", "leader", addr, "error", err)
+		http.Error(w, "forwarding to leader: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 300 {
+		s.opts.ObserveForward(ForwardDelivered)
+	} else {
+		s.opts.ObserveForward(ForwardLeaderError)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	}
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, io.LimitReader(resp.Body, maxBody))
 }

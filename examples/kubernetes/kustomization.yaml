@@ -4,8 +4,10 @@ kind: Kustomization
 namespace: monitoring
 
 resources:
+  - rbac.yaml
   - deployment.yaml
   - service.yaml
+  - pdb.yaml
   # - servicemonitor.yaml
 
 configMapGenerator:

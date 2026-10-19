@@ -5,12 +5,16 @@ metadata:
   labels:
     app.kubernetes.io/name: am-autotask
 spec:
-  # am-autotask runs as a single instance: alert groups are serialised in
-  # memory, so two pods could race to create the same ticket. Recreate stops
-  # the old pod before starting the new one during a rollout.
-  replicas: 1
+  # One replica, the leader, handles notifications and the other forwards
+  # them to it (see leader election in the README). A rollout starts each new
+  # pod before stopping an old one, and the leader releases its Lease on
+  # shutdown, so a standby takes over at once.
+  replicas: 2
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: am-autotask
@@ -19,6 +23,17 @@ spec:
       labels:
         app.kubernetes.io/name: am-autotask
     spec:
+      serviceAccountName: am-autotask
+      # prefer replicas on different nodes, so one node failing leaves a standby
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: am-autotask
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -33,6 +48,17 @@ spec:
           args:
             - serve
             - --config=/etc/am-autotask/config.yaml
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: AM_AUTOTASK_LEADERELECTION_ENABLED
+              value: "true"
+            # where the other replica forwards notifications while this one
+            # leads: the pod IP and the listen port
+            - name: AM_AUTOTASK_LEADERELECTION_ADDRESS
+              value: $(POD_IP):8080
           ports:
             - name: http
               containerPort: 8080

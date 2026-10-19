@@ -26,6 +26,8 @@ tests:
         values: '1000x60'
       - series: 'am_autotask_ready{job="am-autotask", instance="am-autotask:8080"}'
         values: '1x60'
+      - series: 'am_autotask_leader{job="am-autotask", instance="am-autotask:8080"}'
+        values: '1x60'
       - series: 'am_autotask_catchall_tickets_total{job="am-autotask", instance="am-autotask:8080", reason="unmatched"}'
         values: '0x60'
       - series: 'am_autotask_catchall_tickets_total{job="am-autotask", instance="am-autotask:8080", reason="ambiguous"}'
@@ -52,6 +54,7 @@ tests:
       - {eval_time: 50m, alertname: AmAutotaskRestarting, exp_alerts: []}
       - {eval_time: 50m, alertname: AmAutotaskAlertsMoved, exp_alerts: []}
       - {eval_time: 50m, alertname: AmAutotaskNotReady, exp_alerts: []}
+      - {eval_time: 50m, alertname: AmAutotaskNoLeader, exp_alerts: []}
       - {eval_time: 50m, alertname: AmAutotaskSlowAutotask, exp_alerts: []}
       - {eval_time: 50m, alertname: AmAutotaskAmbiguousCompanyMatch, exp_alerts: []}
       - {eval_time: 50m, alertname: AmAutotaskUnmatchedAlertGroups, exp_alerts: []}
@@ -321,6 +324,41 @@ tests:
               summary: am-autotask has not finished starting
               description: am-autotask:8080 has been running for 10 minutes without becoming ready, so it is answering notifications with errors.
               runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotasknotready
+
+  - name: leadership moves between replicas
+    interval: 1m
+    input_series:
+      # a replaces b as leader within a scrape interval, briefly overlapping
+      - series: 'am_autotask_leader{job="am-autotask", instance="10.0.0.1:8080"}'
+        values: '1x5 0x10'
+      - series: 'am_autotask_leader{job="am-autotask", instance="10.0.0.2:8080"}'
+        values: '0x4 1x11'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: AmAutotaskNoLeader
+        exp_alerts: []
+
+  - name: no leader
+    interval: 1m
+    input_series:
+      - series: 'am_autotask_leader{job="am-autotask", instance="10.0.0.1:8080"}'
+        values: '1 1 0x10'
+      - series: 'am_autotask_leader{job="am-autotask", instance="10.0.0.2:8080"}'
+        values: '0x12'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: AmAutotaskNoLeader
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: AmAutotaskNoLeader
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: am-autotask
+            exp_annotations:
+              summary: No am-autotask replica is handling notifications
+              description: No am-autotask replica has been the leader for 2 minutes, so notifications are being answered with errors and are not becoming Autotask tickets.
+              runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotasknoleader
 
   - name: slow autotask
     interval: 1m

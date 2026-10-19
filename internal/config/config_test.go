@@ -631,3 +631,75 @@ func TestPicklistChecksIncludeProblemQueue(t *testing.T) {
 		t.Errorf("missing check %+v", want)
 	}
 }
+
+func TestLeaderElection(t *testing.T) {
+	host, err := os.Hostname()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name    string
+		env     map[string]string
+		want    config.LeaderElection
+		wantErr string
+	}{
+		{name: "off by default", want: config.LeaderElection{Lease: "am-autotask"}},
+		{
+			name: "identity defaults to the host name",
+			env:  map[string]string{"AM_AUTOTASK_LEADERELECTION_ENABLED": "true", "AM_AUTOTASK_LEADERELECTION_ADDRESS": "10.0.0.1:8080"},
+			want: config.LeaderElection{Enabled: true, Lease: "am-autotask", Identity: host, Address: "10.0.0.1:8080"},
+		},
+		{
+			name: "everything set",
+			env: map[string]string{
+				"AM_AUTOTASK_LEADERELECTION_ENABLED":   "true",
+				"AM_AUTOTASK_LEADERELECTION_NAMESPACE": "alerting",
+				"AM_AUTOTASK_LEADERELECTION_LEASE":     "autotask-leader",
+				"AM_AUTOTASK_LEADERELECTION_IDENTITY":  "am-autotask-0",
+				"AM_AUTOTASK_LEADERELECTION_ADDRESS":   "[fd00::1]:8080",
+			},
+			want: config.LeaderElection{Enabled: true, Namespace: "alerting", Lease: "autotask-leader", Identity: "am-autotask-0", Address: "[fd00::1]:8080"},
+		},
+		{
+			name:    "address required",
+			env:     map[string]string{"AM_AUTOTASK_LEADERELECTION_ENABLED": "true"},
+			wantErr: "leaderelection.address is required",
+		},
+		{
+			name:    "address needs a port",
+			env:     map[string]string{"AM_AUTOTASK_LEADERELECTION_ENABLED": "true", "AM_AUTOTASK_LEADERELECTION_ADDRESS": "10.0.0.1"},
+			wantErr: "must be a host:port",
+		},
+		{
+			name:    "address needs a host",
+			env:     map[string]string{"AM_AUTOTASK_LEADERELECTION_ENABLED": "true", "AM_AUTOTASK_LEADERELECTION_ADDRESS": ":8080"},
+			wantErr: "must be a host:port",
+		},
+		{
+			name:    "lease required",
+			env:     map[string]string{"AM_AUTOTASK_LEADERELECTION_ENABLED": "true", "AM_AUTOTASK_LEADERELECTION_ADDRESS": "10.0.0.1:8080", "AM_AUTOTASK_LEADERELECTION_LEASE": ""},
+			wantErr: "leaderelection.lease is required",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+			cfg, err := loadArgs([]string{"--config", writeFile(t, "c.yaml", minimalYAML)})
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("err = %v, want one containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.LeaderElection != tt.want {
+				t.Errorf("LeaderElection = %+v, want %+v", cfg.LeaderElection, tt.want)
+			}
+		})
+	}
+}
