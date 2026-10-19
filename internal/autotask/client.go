@@ -308,7 +308,7 @@ func (c *Client) PreviousTicket(ctx context.Context, externalID string) (*receiv
 
 type ticketBody struct {
 	ID                int64      `json:"id,omitempty"`
-	CompanyID         int64      `json:"companyID,omitempty"`
+	CompanyID         *int64     `json:"companyID,omitempty"` // a pointer as 0 is a valid company
 	Title             string     `json:"title,omitempty"`
 	Description       string     `json:"description,omitempty"`
 	ExternalID        *string    `json:"externalID,omitempty"`
@@ -332,7 +332,7 @@ type createResponse struct {
 // ID, so the ticket is read back for its number.
 func (c *Client) CreateTicket(ctx context.Context, t receiver.NewTicket) (receiver.Ticket, error) {
 	body := ticketBody{
-		CompanyID:      t.CompanyID,
+		CompanyID:      &t.CompanyID,
 		Title:          t.Title,
 		Description:    t.Description,
 		ExternalID:     &t.ExternalID,
