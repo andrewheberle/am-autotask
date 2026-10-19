@@ -12,6 +12,11 @@ import (
 const catchAll = 1
 
 func testOptions() receiver.Options {
+	// times in UTC whatever the local time zone
+	templates, err := receiver.ParseTemplates("", time.UTC)
+	if err != nil {
+		panic(err)
+	}
 	return receiver.Options{
 		CatchAllCompanyID: catchAll,
 		Priorities:        map[string]int{"critical": 4, "warning": 2},
@@ -23,6 +28,7 @@ func testOptions() receiver.Options {
 		NoteType:          1,
 		NotePublish:       2,
 		Now:               func() time.Time { return testTime },
+		Templates:         templates,
 	}
 }
 
@@ -61,7 +67,7 @@ func TestFirstFiringNotificationCreatesTicketAgainstMatchedCompany(t *testing.T)
 	if ticket.CompanyID != 100 {
 		t.Errorf("CompanyID = %d, want 100", ticket.CompanyID)
 	}
-	if want := `HostDown {tenant_id="foo"}`; ticket.Title != want {
+	if want := `Host is down {tenant_id="foo"}`; ticket.Title != want {
 		t.Errorf("Title = %q, want %q", ticket.Title, want)
 	}
 	if ticket.Priority != 4 || ticket.Status != 1 || ticket.TicketType != 5 || ticket.Source != 8 {

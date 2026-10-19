@@ -35,7 +35,7 @@ func TestPreviewTemplates(t *testing.T) {
 	}
 
 	got := b.String()
-	for _, want := range []string{"=== ticket.title\nops: acme\n\n", "=== ticket.description\n", "=== note.title\n0 firing, 0 resolved\n\n", "=== note.description\n", "System notices"} {
+	for _, want := range []string{"=== ticket.title\nops: acme\n\n", "=== ticket.description\n", "=== note.title\nAlert group: 0 firing, 0 resolved\n\n", "=== note.description\n", "System notices"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("preview missing %q:\n%s", want, got)
 		}

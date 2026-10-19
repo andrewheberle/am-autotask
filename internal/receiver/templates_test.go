@@ -89,7 +89,7 @@ func TestRenderedOutputIsTidied(t *testing.T) {
 		{
 			name:      "empty title uses the built-in template",
 			src:       `{{define "ticket.title"}} {{.GroupLabels.missing}} {{end}}`,
-			wantTitle: `HostDown {tenant_id="foo"}`,
+			wantTitle: `Host is down {tenant_id="foo"}`,
 		},
 	}
 	for _, tt := range tests {
@@ -129,7 +129,7 @@ func TestFailingTemplateFallsBackToBuiltIn(t *testing.T) {
 	handle(t, r, notification(hostAlert("aaaa", "firing", "web1"), hostAlert("bbbb", "firing", "web2")))
 
 	ticket := onlyTicket(t, at)
-	if want := `HostDown {tenant_id="foo"}`; ticket.Title != want {
+	if want := `Host is down {tenant_id="foo"}`; ticket.Title != want {
 		t.Errorf("Title = %q, want built-in %q", ticket.Title, want)
 	}
 	notes := at.notesFor(ticket.ID)
@@ -207,7 +207,7 @@ func TestPreviewRendersEveryTemplate(t *testing.T) {
 		t.Fatalf("Preview: %v", err)
 	}
 	want := map[string]string{
-		"ticket.title":       `HostDown {tenant_id="example"}`,
+		"ticket.title":       `Host is not responding {tenant_id="example"}`,
 		"note.title":         "T20261019.0001: 2/1",
 		"ticket.description": "Host is not responding\n",
 		"note.description":   "Firing (2):\n",
@@ -216,5 +216,33 @@ func TestPreviewRendersEveryTemplate(t *testing.T) {
 		if !strings.HasPrefix(got[name], prefix) {
 			t.Errorf("%s = %q, want it to start with %q", name, got[name], prefix)
 		}
+	}
+}
+
+func TestTimesAreShownInTheTemplatesTimeZone(t *testing.T) {
+	perth, err := time.LoadLocation("Australia/Perth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	builtin, err := receiver.ParseTemplates("", perth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := newFakeAutotask()
+	opts := testOptions()
+	opts.Templates = builtin
+	r := newReceiver(t, at, opts)
+
+	before := notification(hostAlert("aaaa", "firing", "web1"))
+	handle(t, r, before)
+	handle(t, r, regrouped("perth", hostAlert("aaaa", "firing", "web1")))
+
+	orphan := ticketFor(t, at, before)
+	const want = "Started: 2026-10-17 11:50:00 AWST"
+	if !strings.Contains(orphan.Description, want) {
+		t.Errorf("ticket description should contain %q:\n%s", want, orphan.Description)
+	}
+	if notes := at.notesFor(orphan.ID); len(notes) != 1 || !strings.Contains(notes[0].Description, want) {
+		t.Errorf("moved alerts note should contain %q: %+v", want, notes)
 	}
 }

@@ -20,8 +20,8 @@ func TestNewlyFiringAlertAddsNoteAndIsRecorded(t *testing.T) {
 		t.Fatalf("expected one note, got %d", len(notes))
 	}
 	note := notes[0]
-	if note.Title != "1 firing, 0 resolved" {
-		t.Errorf("note Title = %q, want %q", note.Title, "1 firing, 0 resolved")
+	if note.Title != "HostDown: 1 firing, 0 resolved" {
+		t.Errorf("note Title = %q, want %q", note.Title, "HostDown: 1 firing, 0 resolved")
 	}
 	if !strings.Contains(note.Description, `instance="web2"`) || strings.Contains(note.Description, `instance="web1"`) {
 		t.Errorf("note should list only the newly firing alert:\n%s", note.Description)
@@ -46,8 +46,8 @@ func TestResolvedAlertAddsNoteAndIsNoLongerRecorded(t *testing.T) {
 	if len(notes) != 1 {
 		t.Fatalf("expected one note, got %d", len(notes))
 	}
-	if notes[0].Title != "0 firing, 1 resolved" {
-		t.Errorf("note Title = %q, want %q", notes[0].Title, "0 firing, 1 resolved")
+	if notes[0].Title != "HostDown: 0 firing, 1 resolved" {
+		t.Errorf("note Title = %q, want %q", notes[0].Title, "HostDown: 0 firing, 1 resolved")
 	}
 	if !strings.Contains(notes[0].Description, `instance="web2"`) || !strings.Contains(notes[0].Description, "Ended:") {
 		t.Errorf("note should list the resolved alert with its end time:\n%s", notes[0].Description)

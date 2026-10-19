@@ -1,5 +1,5 @@
 === ticket title
-HostDown {tenant_id="both"}
+Host is down {tenant_id="both"}
 === ticket description
 NOTE: this alert group matched the company selectors of more than one company (IDs 100, 200) so it was raised against the catch-all company. Correct the company selectors so only one company matches.
 
@@ -11,5 +11,5 @@ Alertmanager: http://alertmanager:9093/#/alerts?receiver=autotask
 Firing (1):
 - HostDown {instance="web1", severity="critical"}
   summary of aaaa
-  Started: 2026-10-17T03:50:00Z
+  Started: 2026-10-17 03:50:00 UTC
   Source: http://prometheus/graph?g0.expr=aaaa
