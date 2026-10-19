@@ -1,6 +1,6 @@
 # Monitoring am-autotask
 
-am-autotask exposes Prometheus metrics at `/metrics`. This page covers what to scrape, what the metrics mean, the alerting rules in [examples/prometheus](../examples/prometheus/), and what to do when each alert fires.
+am-autotask exposes Prometheus metrics at `/metrics`. This page covers what to scrape, what the metrics mean, the Grafana dashboard in [examples/grafana](../examples/grafana/), the alerting rules in [examples/prometheus](../examples/prometheus/), and what to do when each alert fires.
 
 ## Scraping
 
@@ -63,6 +63,23 @@ increase(am_autotask_ticket_priority_overrides_total[1d])
 # deliveries Alertmanager could not make to webhook receivers, including am-autotask
 sum(rate(alertmanager_notifications_failed_total{integration="webhook"}[5m]))
 ```
+
+## Dashboard
+
+[am-autotask.json](../examples/grafana/am-autotask.json) is a Grafana dashboard for Grafana 11.0 or later. Import it from **Dashboards → New → Import**, or provision it from a file as the [Compose example](../examples/compose/) does. It has three variables:
+
+- **Data source**: the Prometheus data source that scrapes am-autotask.
+- **Job**: the `job` label am-autotask is scraped with.
+- **Instance**: one or more of that job's instances.
+
+Its rows are:
+
+- **Status**: am-autotask's own firing and pending alerts from the [alerting rules](#alerting-rules), readiness, the age of the company selectors and how many companies' selectors are valid. The alert list needs Grafana to read the rules from the data source, which it does for Prometheus and Mimir.
+- **Notifications**: notifications by result, the share failing, and Alertmanager's failed webhook deliveries. Like the query above, the last counts every webhook receiver.
+- **Autotask**: request duration and errors by operation.
+- **Tickets** (collapsed): tickets and notes created, catch-all tickets, priority changes compared with overrides, and orphaned tickets. These don't need anyone to act on them straight away; use them to tune company selectors and `ticket.priorities`.
+
+When an alert fires, open its runbook below and use the dashboard to see when the problem started and how far it reaches.
 
 ## Traces
 

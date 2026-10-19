@@ -273,8 +273,9 @@ docker run -v ./config.yaml:/etc/am-autotask/config.yaml \
 
 ### Examples
 
-- [Docker Compose](examples/compose/): am-autotask with Alertmanager and Prometheus, including the self-monitoring rules.
+- [Docker Compose](examples/compose/): am-autotask with Alertmanager, Prometheus and Grafana, including the self-monitoring rules and the dashboard.
 - [Kubernetes](examples/kubernetes/): a Deployment, Service and optional ServiceMonitor, applied with Kustomize.
+- [Grafana dashboard](examples/grafana/am-autotask.json): notifications, Autotask requests and tickets at a glance. See [Monitoring](docs/monitoring.md#dashboard).
 
 ### Endpoints
 
@@ -283,7 +284,7 @@ docker run -v ./config.yaml:/etc/am-autotask/config.yaml \
 | `POST /webhook` | Alertmanager webhook receiver. Requires `Authorization: Bearer <webhook.token>`. |
 | `GET /healthz` | Always `200` while the process is running. |
 | `GET /readyz` | `200` once Autotask has been reached, configuration validated and company selectors loaded. Until then notifications are answered with `500`, so Alertmanager retries them. |
-| `GET /metrics` | Prometheus metrics, prefixed `am_autotask_`: notifications by result, tickets and notes created, alerts moved off orphaned tickets and orphaned tickets completed, tickets raised against the catch-all company, Autotask errors and request durations by operation, readiness, and the age and validity of the company selectors. See [Monitoring](docs/monitoring.md) for what they mean and ready-made alerting rules. |
+| `GET /metrics` | Prometheus metrics, prefixed `am_autotask_`: notifications by result, tickets and notes created, alerts moved off orphaned tickets and orphaned tickets completed, tickets raised against the catch-all company, Autotask errors and request durations by operation, readiness, and the age and validity of the company selectors. See [Monitoring](docs/monitoring.md) for what they mean, ready-made alerting rules and a Grafana dashboard. |
 
 ## Limitations
 

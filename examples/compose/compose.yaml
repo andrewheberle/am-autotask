@@ -1,5 +1,6 @@
-# am-autotask with Alertmanager sending it notifications and Prometheus
-# scraping both and evaluating the self-monitoring rules. See README.md.
+# am-autotask with Alertmanager sending it notifications, Prometheus
+# scraping both and evaluating the self-monitoring rules, and Grafana showing
+# the example dashboard. See README.md.
 name: am-autotask
 
 services:
@@ -41,6 +42,23 @@ services:
       - ../prometheus/am-autotask.rules.yml:/etc/prometheus/rules/am-autotask.rules.yml:ro
       - prometheus:/prometheus
 
+  grafana:
+    image: grafana/grafana:13.2.4
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana-admin-password
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ../grafana/am-autotask.json:/etc/grafana/dashboards/am-autotask.json:ro
+      - grafana:/var/lib/grafana
+    secrets:
+      - grafana-admin-password
+
 # each secret is mounted at /run/secrets/<name>; create the files first
 secrets:
   webhook-token:
@@ -51,7 +69,10 @@ secrets:
     file: ./secrets/autotask-secret
   autotask-integrationcode:
     file: ./secrets/autotask-integrationcode
+  grafana-admin-password:
+    file: ./secrets/grafana-admin-password
 
 volumes:
   alertmanager:
   prometheus:
+  grafana:
