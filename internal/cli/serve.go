@@ -156,6 +156,7 @@ func (c *serveCommand) serve(ctx context.Context, cfg config.Config, logger *slo
 		ZoneInformationURL:  cfg.Autotask.ZoneURL,
 		CompanySelectorsUDF: cfg.CompanySelectorsUDF,
 		RecordedAlertsUDF:   cfg.RecordedAlertsUDF,
+		AppliedPriorityUDF:  cfg.AppliedPriorityUDF,
 		HTTPClient: &http.Client{
 			Timeout:   60 * time.Second,
 			Transport: tracing.Transport(http.DefaultTransport, tp.TracerProvider),
@@ -180,6 +181,11 @@ func (c *serveCommand) serve(ctx context.Context, cfg config.Config, logger *slo
 	go cache.Run(ctx, cfg.Refresh)
 
 	opts := cfg.Receiver
+	if opts.FollowSeverity {
+		if opts.PriorityLabels, err = priorityLabels(ctx, client); err != nil {
+			return err
+		}
+	}
 	opts.Logger = logger
 	opts.Observer = m
 	opts.TracerProvider = tp.TracerProvider
@@ -203,4 +209,18 @@ func (c *serveCommand) serve(ctx context.Context, cfg config.Config, logger *slo
 	err = srv.Shutdown(shutdownCtx)
 	flushed = true
 	return errors.Join(err, tp.Shutdown(shutdownCtx))
+}
+
+// priorityLabels names each ticket priority ID, for notes about priority
+// changes.
+func priorityLabels(ctx context.Context, client *autotask.Client) (map[int]string, error) {
+	picklists, err := client.Picklists(ctx, "Tickets")
+	if err != nil {
+		return nil, fmt.Errorf("reading ticket priorities: %w", err)
+	}
+	labels := map[int]string{}
+	for _, v := range picklists["priority"] {
+		labels[v.ID] = v.Label
+	}
+	return labels, nil
 }

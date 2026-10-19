@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -59,6 +60,11 @@ type Ticket struct {
 	Status         int
 	ExternalID     string
 	RecordedAlerts string
+	Priority       int
+	// AppliedPriority is the priority the receiver last set, "override"
+	// after a priority override, or empty when the ticket's priority is not
+	// managed.
+	AppliedPriority string
 }
 
 // NewTicket is a ticket to create. Zero-valued optional IDs are omitted.
@@ -77,6 +83,8 @@ type NewTicket struct {
 	Category       int
 	DueDateTime    *time.Time
 	RecordedAlerts string
+	// AppliedPriority is empty unless the priority follows severity.
+	AppliedPriority string
 }
 
 // NewNote is a ticket note to create.
@@ -90,9 +98,11 @@ type NewNote struct {
 
 // TicketUpdate changes the non-nil fields of a ticket in a single request.
 type TicketUpdate struct {
-	Status         *int
-	RecordedAlerts *string
-	ExternalID     *string
+	Status          *int
+	RecordedAlerts  *string
+	ExternalID      *string
+	Priority        *int
+	AppliedPriority *string
 }
 
 // Autotask is the subset of the Autotask API the receiver needs.
@@ -128,6 +138,17 @@ type Options struct {
 	SeverityLabel   string
 	Priorities      map[string]int
 	DefaultPriority int
+
+	// SeverityOrder ranks severities, most serious first. When set, an
+	// alert group's severity is the highest among its firing alerts rather
+	// than its common severity label; severities not listed rank lowest.
+	SeverityOrder []string
+	// FollowSeverity changes a ticket's priority as its alert group's
+	// severity changes, until a priority override. Requires SeverityOrder.
+	FollowSeverity bool
+	// PriorityLabels names priority IDs in ticket notes; IDs without a label
+	// are shown as numbers.
+	PriorityLabels map[int]string
 
 	Status     int
 	TicketType int
@@ -180,13 +201,22 @@ type Observer interface {
 	// OrphanCompleted is called when an orphaned ticket is completed because
 	// all of its alerts have moved.
 	OrphanCompleted()
+	// PriorityChanged is called when a ticket's priority follows its alert
+	// group's severity, with the direction: [PriorityRaised] or
+	// [PriorityLowered].
+	PriorityChanged(direction string)
+	// PriorityOverridden is called once for each ticket found to have a
+	// priority override.
+	PriorityOverridden()
 }
 
 type noopObserver struct{}
 
-func (noopObserver) CatchAll(string)  {}
-func (noopObserver) AlertsMoved(int)  {}
-func (noopObserver) OrphanCompleted() {}
+func (noopObserver) CatchAll(string)        {}
+func (noopObserver) AlertsMoved(int)        {}
+func (noopObserver) OrphanCompleted()       {}
+func (noopObserver) PriorityChanged(string) {}
+func (noopObserver) PriorityOverridden()    {}
 
 // Receiver applies notifications to Autotask.
 type Receiver struct {
@@ -201,6 +231,9 @@ type Receiver struct {
 func New(at Autotask, matcher CompanyMatcher, locker Locker, opts Options) (*Receiver, error) {
 	if opts.DefaultPriority == 0 {
 		return nil, errors.New("default priority is required")
+	}
+	if opts.FollowSeverity && len(opts.SeverityOrder) == 0 {
+		return nil, errors.New("following severity requires a severity order")
 	}
 	if opts.SeverityLabel == "" {
 		opts.SeverityLabel = "severity"
@@ -355,6 +388,13 @@ func (r *Receiver) update(ctx context.Context, n Notification, t Ticket) (change
 	}
 	noted := len(fired) > 0 || len(resolved) > 0 || (groupResolved && t.RecordedAlerts != "")
 
+	// priority only follows alerts firing or resolving, not alerts that are
+	// silenced or inhibited and so missing from the notification
+	var pc priorityChange
+	if !groupResolved && (len(fired) > 0 || len(resolved) > 0) {
+		pc = r.reprioritise(ctx, n, t)
+	}
+
 	var update TicketUpdate
 	if noted {
 		value, overflow := encodeRecorded(keys(recorded))
@@ -366,7 +406,7 @@ func (r *Receiver) update(ctx context.Context, n Notification, t Ticket) (change
 		if err := r.at.CreateNote(ctx, NewNote{
 			TicketID:    t.ID,
 			Title:       truncate(title, maxNoteTitle),
-			Description: noteDescription(n, fired, resolved, overflow),
+			Description: noteDescription(n, fired, resolved, overflow, pc.note),
 			NoteType:    r.opts.NoteType,
 			Publish:     r.opts.NotePublish,
 		}); err != nil {
@@ -374,6 +414,8 @@ func (r *Receiver) update(ctx context.Context, n Notification, t Ticket) (change
 		}
 
 		update.RecordedAlerts = &value
+		update.Priority = pc.priority
+		update.AppliedPriority = pc.applied
 	}
 
 	// also applied when a previous attempt noted the resolution but failed
@@ -388,6 +430,7 @@ func (r *Receiver) update(ctx context.Context, n Notification, t Ticket) (change
 	if err := r.at.UpdateTicket(ctx, t.ID, update); err != nil {
 		return false, fmt.Errorf("updating ticket %s: %w", t.Number, err)
 	}
+	r.observePriority(ctx, t, pc)
 
 	return true, nil
 }
@@ -412,13 +455,14 @@ func (r *Receiver) create(ctx context.Context, n Notification, externalID string
 		span.SetAttributes(attribute.String("am_autotask.catchall", catchAll))
 	}
 	recorded, overflow := encodeRecorded(fingerprints(firing))
+	_, priority := r.severity(n, firing)
 
 	t := NewTicket{
 		CompanyID:      companyID,
 		Title:          ticketTitle(n),
 		Description:    ticketDescription(n, firing, ambiguous, previous, orphanTickets(orphans), overflow),
 		ExternalID:     externalID,
-		Priority:       r.priority(n.CommonLabels),
+		Priority:       priority,
 		Status:         r.opts.Status,
 		TicketType:     r.opts.TicketType,
 		Source:         r.opts.Source,
@@ -427,6 +471,9 @@ func (r *Receiver) create(ctx context.Context, n Notification, externalID string
 		SubIssueType:   r.opts.SubIssueType,
 		Category:       r.opts.Category,
 		RecordedAlerts: recorded,
+	}
+	if r.opts.FollowSeverity {
+		t.AppliedPriority = strconv.Itoa(priority)
 	}
 	if r.opts.DueIn > 0 {
 		due := r.opts.Now().Add(r.opts.DueIn)
@@ -464,13 +511,6 @@ func (r *Receiver) company(ctx context.Context, groupLabels map[string]string) (
 			"companies", ids, "groupLabels", groupLabels)
 		return r.opts.CatchAllCompanyID, CatchAllAmbiguous, ids
 	}
-}
-
-func (r *Receiver) priority(commonLabels map[string]string) int {
-	if p, ok := r.opts.Priorities[commonLabels[r.opts.SeverityLabel]]; ok {
-		return p
-	}
-	return r.opts.DefaultPriority
 }
 
 func alertsWithStatus(alerts []Alert, status string) []Alert {

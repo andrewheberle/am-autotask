@@ -114,11 +114,14 @@ func noteTitle(fired, resolved int) string {
 	return fmt.Sprintf("%d firing, %d resolved", fired, resolved)
 }
 
-func noteDescription(n Notification, fired, resolved []Alert, overflow bool) string {
+func noteDescription(n Notification, fired, resolved []Alert, overflow bool, priority string) string {
 	var b strings.Builder
 
 	if overflow {
 		b.WriteString("NOTE: " + overflowNotice + "\n\n")
+	}
+	if priority != "" {
+		b.WriteString(priority + "\n\n")
 	}
 	if len(fired) > 0 {
 		fmt.Fprintf(&b, "Firing (%d):\n", len(fired))

@@ -28,6 +28,8 @@ All am-autotask metrics are prefixed `am_autotask_`. The standard Go runtime (`g
 | `am_autotask_company_selectors_age_seconds` | gauge | | Time since company selectors were last loaded from Autotask. It drops back to zero on each successful reload, every `company.refresh` (default 15 minutes), and keeps growing while reloads fail. It is zero until the first load. |
 | `am_autotask_company_selectors_companies` | gauge | `state` | Companies with company selectors in the last successful load: `valid`, or `invalid` (their selectors do not parse, so they are skipped and no alert group can match them). |
 | `am_autotask_catchall_tickets_total` | counter | `reason` | Tickets raised against the catch-all company: `unmatched` (no company's selectors matched the alert group) or `ambiguous` (more than one company's did). |
+| `am_autotask_ticket_priority_changes_total` | counter | `direction` | Ticket priorities changed to follow their alert group's severity, `raised` or `lowered`. Only counted when `ticket.appliedpriorityudf` is set. |
+| `am_autotask_ticket_priority_overrides_total` | counter | | Tickets found with a priority a person changed, which then no longer follows severity. Counted once per ticket. A high rate compared with `am_autotask_ticket_priority_changes_total` suggests `ticket.priorities` or `ticket.severityorder` doesn't match how the service desk prioritises. |
 | `am_autotask_ready` | gauge | | `1` once startup has completed and notifications are being handled, otherwise `0`. |
 | `am_autotask_autotask_request_duration_seconds` | histogram | `operation` | Duration of Autotask operations made while handling notifications, with the same `operation` values as `am_autotask_autotask_errors_total`. An operation includes all of its pages and any read back, such as `create_ticket` reading the new ticket's number. |
 
@@ -53,6 +55,10 @@ histogram_quantile(0.95, sum by (operation, le) (rate(am_autotask_autotask_reque
 
 # tickets raised against the catch-all company per day, by reason
 sum by (reason) (increase(am_autotask_catchall_tickets_total[1d]))
+
+# ticket priorities changed to follow severity, and manual overrides, per day
+sum by (direction) (increase(am_autotask_ticket_priority_changes_total[1d]))
+increase(am_autotask_ticket_priority_overrides_total[1d])
 
 # deliveries Alertmanager could not make to webhook receivers, including am-autotask
 sum(rate(alertmanager_notifications_failed_total{integration="webhook"}[5m]))

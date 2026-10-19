@@ -27,6 +27,8 @@ type Metrics struct {
 	alertsMoved    prometheus.Counter
 	orphansDone    prometheus.Counter
 	catchAll       *prometheus.CounterVec
+	priorities     *prometheus.CounterVec
+	overrides      prometheus.Counter
 	duration       *prometheus.HistogramVec
 }
 
@@ -75,6 +77,14 @@ func New(opts Options) *Metrics {
 			Namespace: namespace, Name: "catchall_tickets_total",
 			Help: "Tickets raised against the catch-all company, by reason (unmatched, ambiguous).",
 		}, []string{"reason"}),
+		priorities: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace, Name: "ticket_priority_changes_total",
+			Help: "Ticket priorities changed to follow their alert group's severity, by direction (raised, lowered).",
+		}, []string{"direction"}),
+		overrides: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: namespace, Name: "ticket_priority_overrides_total",
+			Help: "Tickets found with a manually changed priority, which then no longer follows severity.",
+		}),
 		duration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: namespace, Name: "autotask_request_duration_seconds",
 			Help:    "Duration of Autotask API operations made while handling notifications, including paging, by operation.",
@@ -85,6 +95,9 @@ func New(opts Options) *Metrics {
 	// start the known label values at zero so rates work from the first scrape
 	for _, reason := range []string{receiver.CatchAllUnmatched, receiver.CatchAllAmbiguous} {
 		m.catchAll.WithLabelValues(reason)
+	}
+	for _, direction := range []string{receiver.PriorityRaised, receiver.PriorityLowered} {
+		m.priorities.WithLabelValues(direction)
 	}
 
 	selectorCount := func(state string, pick func(valid, invalid int) int) prometheus.Collector {
@@ -97,7 +110,7 @@ func New(opts Options) *Metrics {
 
 	m.registry.MustRegister(
 		m.notifications, m.ticketsCreated, m.notesCreated, m.autotaskErrors, m.alertsMoved, m.orphansDone,
-		m.catchAll, m.duration,
+		m.catchAll, m.priorities, m.overrides, m.duration,
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: namespace, Name: "company_selectors_age_seconds",
 			Help: "Seconds since company selectors were last loaded from Autotask.",
@@ -138,6 +151,16 @@ func (m *Metrics) AlertsMoved(n int) {
 // OrphanCompleted implements [receiver.Observer].
 func (m *Metrics) OrphanCompleted() {
 	m.orphansDone.Inc()
+}
+
+// PriorityChanged implements [receiver.Observer].
+func (m *Metrics) PriorityChanged(direction string) {
+	m.priorities.WithLabelValues(direction).Inc()
+}
+
+// PriorityOverridden implements [receiver.Observer].
+func (m *Metrics) PriorityOverridden() {
+	m.overrides.Inc()
 }
 
 // ObserveNotification counts a webhook request by result.

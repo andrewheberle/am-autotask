@@ -427,3 +427,81 @@ func TestInvalidConfigurationIsListedOnePerLine(t *testing.T) {
 		t.Errorf("err = %v, want:\n%s", err, want)
 	}
 }
+
+func TestSeverityOrder(t *testing.T) {
+	const priorities = `
+ticket:
+  defaultpriority: 3
+  priorities:
+    critical: 4
+    warning: 2
+`
+	tests := []struct {
+		name       string
+		args       []string
+		wantOrder  []string
+		wantFollow bool
+		wantErrs   []string
+	}{
+		{name: "unset by default"},
+		{
+			name:      "ranks severities",
+			args:      []string{"--ticket.severityorder", "critical,warning"},
+			wantOrder: []string{"critical", "warning"},
+		},
+		{
+			name:       "applied priority UDF follows severity",
+			args:       []string{"--ticket.severityorder", "critical,warning", "--ticket.appliedpriorityudf", "Alertmanager Applied Priority"},
+			wantOrder:  []string{"critical", "warning"},
+			wantFollow: true,
+		},
+		{
+			name:     "applied priority UDF without order",
+			args:     []string{"--ticket.appliedpriorityudf", "Alertmanager Applied Priority"},
+			wantErrs: []string{"ticket.appliedpriorityudf requires ticket.severityorder"},
+		},
+		{
+			name: "order not matching priorities",
+			args: []string{"--ticket.severityorder", "critical,info,critical"},
+			wantErrs: []string{
+				`ticket.severityorder lists "info", which is not in ticket.priorities`,
+				`ticket.severityorder lists "critical" more than once`,
+				`ticket.severityorder must list "warning" from ticket.priorities`,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := loadArgs(append([]string{"--config", writeFile(t, "c.yaml", baseYAML+priorities)}, tt.args...))
+			if len(tt.wantErrs) > 0 {
+				for _, want := range tt.wantErrs {
+					if err == nil || !strings.Contains(err.Error(), want) {
+						t.Errorf("err = %v, want one containing %q", err, want)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if !slices.Equal(cfg.Receiver.SeverityOrder, tt.wantOrder) || cfg.Receiver.FollowSeverity != tt.wantFollow {
+				t.Errorf("SeverityOrder, FollowSeverity = %v, %v; want %v, %v",
+					cfg.Receiver.SeverityOrder, cfg.Receiver.FollowSeverity, tt.wantOrder, tt.wantFollow)
+			}
+			if tt.wantFollow && cfg.AppliedPriorityUDF != "Alertmanager Applied Priority" {
+				t.Errorf("AppliedPriorityUDF = %q", cfg.AppliedPriorityUDF)
+			}
+		})
+	}
+}
+
+func TestSeverityOrderFromEnv(t *testing.T) {
+	t.Setenv("AM_AUTOTASK_TICKET_PRIORITIES", "critical=4,warning=2")
+	t.Setenv("AM_AUTOTASK_TICKET_SEVERITYORDER", "critical,warning")
+
+	cfg := load(t, "--config", writeFile(t, "c.yaml", minimalYAML))
+
+	if want := []string{"critical", "warning"}; !slices.Equal(cfg.Receiver.SeverityOrder, want) {
+		t.Errorf("SeverityOrder = %v, want %v", cfg.Receiver.SeverityOrder, want)
+	}
+}

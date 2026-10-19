@@ -15,6 +15,7 @@ Each Alertmanager alert group gets one Autotask ticket, raised against the compa
 - **Resolution.** When every alert in the group has resolved, a final note is added and the ticket is set to `ticket.resolvedstatus` (default 5, *Complete*).
 - **Closed tickets are never reopened.** If a group fires again after its ticket was completed, including when a technician completed it while alerts were still firing, a new ticket is created that references the previous one.
 - **Orphaned tickets are handed over.** Changing route matchers, `group_by` or how routes nest gives the affected groups new group keys, leaving their open tickets behind. Alertmanager then sends the alerts again under the new keys. When a firing alert is still recorded on another group's open ticket, that ticket is orphaned: the alert is noted there as moved, naming its new ticket, and is no longer recorded on it. Once all its alerts have moved, the orphaned ticket is set to `ticket.resolvedstatus`. A new ticket that takes over alerts says which ticket it continues.
+- **Priority follows severity.** Optionally, a ticket's priority rises and falls with its alert group's severity, for example when an Alertmanager inhibition rule mutes a `warning` alert while the matching `critical` one fires. A person changing the priority takes over from then on. See [Priority and severity](#priority-and-severity).
 - **Retries.** Temporary Autotask failures (timeouts, 5xx, 429) return HTTP 500 so Alertmanager retries the notification. Permanent failures (Autotask rejecting the request) are logged with the payload and acknowledged so they are not retried forever.
 
 See [GLOSSARY.md](GLOSSARY.md) for the terms used here.
@@ -24,7 +25,7 @@ See [GLOSSARY.md](GLOSSARY.md) for the terms used here.
 - **Title.** The alert name followed by the remaining group labels, for example `KubePodCrashLooping {cluster="prod", namespace="payments"}`.
 - **Description.** The `summary` and `description` annotations when every alert shares them, then the group labels, a link to the alerts in Alertmanager (when Alertmanager sends its `externalURL`), and each firing alert with its labels, summary, start time and source link.
 - **Runbooks.** An alert's `runbook_url` annotation is shown so the service desk can follow it. A runbook shared by every alert is shown once, near the top of the description as `Runbook: <url>`; otherwise each alert's runbook is shown under that alert. Notes show the runbooks of newly firing alerts, unless it is the runbook every alert shares, and never for resolved or moved alerts. The value is shown as written, without checking that it is a valid URL.
-- **Notes.** Titled with the number of alerts that fired and resolved, for example `1 firing, 0 resolved`, prefixed with `Alert group resolved:` when the whole group has resolved, and listing each alert.
+- **Notes.** Titled with the number of alerts that fired and resolved, for example `1 firing, 0 resolved`, prefixed with `Alert group resolved:` when the whole group has resolved, and listing each alert. When the ticket's priority follows severity, a note also says when the priority was raised or lowered, or that a person changed it.
 
 Text longer than Autotask allows is cut short, ending with `… (truncated)`.
 
@@ -34,9 +35,10 @@ Text longer than Autotask allows is cut short, ending with `… (truncated)`.
 2. **Create a Company UDF**, by default named `Alertmanager Selectors`. Use a text field (multi-line, if you want several selectors). This holds each company's company selectors.
 3. **Create a Ticket UDF**, by default named `Alertmanager Recorded Alerts`. Use a text field. The receiver manages its contents; it should not be edited by hand.
 4. **Choose the catch-all company**, for example your own company, and note its ID. Your own company always has ID `0`. `am-autotask lookup companies` finds it (see [Finding IDs](#finding-ids)).
-5. **Find the picklist IDs** to use: the priority for each severity, plus any queue, issue type, sub-issue type or category you want. Configuration always uses numeric IDs, never labels, as labels vary by instance and language. The Autotask UI mostly shows labels, so use `am-autotask lookup picklists` to list the IDs.
+5. **Optionally, create another Ticket UDF** for the applied priority, for example `Alertmanager Applied Priority`, if ticket priority should follow severity. Use a text field. The receiver manages its contents; it should not be edited by hand. See [Priority and severity](#priority-and-severity).
+6. **Find the picklist IDs** to use: the priority for each severity, plus any queue, issue type, sub-issue type or category you want. Configuration always uses numeric IDs, never labels, as labels vary by instance and language. The Autotask UI mostly shows labels, so use `am-autotask lookup picklists` to list the IDs.
 
-At startup the receiver checks every configured ID against Autotask, along with both UDFs and the catch-all company, and refuses to start if anything is missing or inactive. A rejected picklist ID is reported with the setting it came from and the active values of that picklist, for example `ticket.queue: Tickets queueID has no value 99; active values are 8 (Service Desk), 29682833 (Monitoring)`.
+At startup the receiver checks every configured ID against Autotask, along with every configured UDF and the catch-all company, and refuses to start if anything is missing or inactive. A rejected picklist ID is reported with the setting it came from and the active values of that picklist, for example `ticket.queue: Tickets queueID has no value 99; active values are 8 (Service Desk), 29682833 (Monitoring)`.
 
 ### Finding IDs
 
@@ -150,7 +152,9 @@ Each secret can be given directly or as a path to a file containing it, which su
 | `ticket.udf` | `Alertmanager Recorded Alerts` | Name of the Ticket UDF holding recorded alerts. |
 | `ticket.priorities` | | Map of severity to priority ID, e.g. `critical: 4`. As a flag or environment variable: `critical=4,warning=2`. |
 | `ticket.defaultpriority` | | Priority ID for severities not in `ticket.priorities`. Required. |
-| `ticket.severitylabel` | `severity` | Common label whose value is looked up in `ticket.priorities`. |
+| `ticket.severitylabel` | `severity` | Label whose value is looked up in `ticket.priorities`. |
+| `ticket.severityorder` | | Severities from `ticket.priorities`, most serious first, e.g. `[critical, warning]`. As a flag or environment variable: `critical,warning`. Optional; when set it must list exactly the severities in `ticket.priorities`. See [Priority and severity](#priority-and-severity). |
+| `ticket.appliedpriorityudf` | | Name of the Ticket UDF holding the priority last applied. Optional; setting it makes ticket priority follow severity, and requires `ticket.severityorder`. |
 | `ticket.status` | `1` (*New*) | Status ID of new tickets. |
 | `ticket.type` | `5` (*Alert*) | Ticket type ID of new tickets. |
 | `ticket.source` | `8` (*Monitoring Alert*) | Source ID of new tickets. |
@@ -183,6 +187,33 @@ ticket:
   defaultpriority: 3
   queue: 8
   duein: 4h
+```
+
+## Priority and severity
+
+A ticket's priority comes from its alert group's severity: the value of the `ticket.severitylabel` label looked up in `ticket.priorities`, or `ticket.defaultpriority` for a severity that isn't listed.
+
+**Without `ticket.severityorder`**, the severity is the label shared by every alert in the notification. A group mixing severities, such as one instance `critical` and another `warning`, gets `ticket.defaultpriority`. The priority is set once, when the ticket is created.
+
+**With `ticket.severityorder`**, the severity is the highest among the group's firing alerts, ranked by that list; severities not in it rank lowest. A group mixing `critical` and `warning` alerts is raised at the `critical` priority.
+
+**With `ticket.appliedpriorityudf` as well**, the priority also follows the severity after creation:
+
+- Whenever a notification records an alert firing or resolving, the priority is set from the highest severity then firing, and the note says it was raised or lowered. Alerts that leave the notification without resolving, because they are silenced or inhibited, change nothing, so silencing a `critical` alert while working on it does not lower the ticket.
+- This suits an inhibition rule that mutes the `warning` alert while the `critical` one for the same target fires. The ticket is raised when the `critical` fires and lowered again when it resolves and the `warning` returns. Both alerts must be in the same alert group, so `severity` must not be in the route's `group_by`; otherwise each severity gets its own ticket.
+- When the whole group resolves, or once an alert group has too many alerts to track individually, the priority is left as it is.
+- **A person changing the priority takes over for the rest of the ticket's life.** The receiver records the priority it last set in the UDF. If the ticket's priority no longer matches, it adds a note saying the priority was changed manually, sets the UDF to `override`, and never changes that ticket's priority again, even if it is later set back. See [ADR-0004](docs/adr/0004-applied-priority-udf-detects-overrides.md).
+- Tickets opened before `ticket.appliedpriorityudf` was set have an empty UDF, and their priority is left alone.
+- The due date set by `ticket.duein` is not changed. Autotask may recalculate service level targets itself when the priority changes, depending on how the instance's service level agreements are set up.
+
+```yaml
+ticket:
+  priorities:
+    critical: 4
+    warning: 2
+  severityorder: [critical, warning]
+  appliedpriorityudf: Alertmanager Applied Priority
+  defaultpriority: 3
 ```
 
 ## Tracing
