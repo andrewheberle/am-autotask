@@ -170,6 +170,10 @@ type Options struct {
 	NoteType    int
 	NotePublish int
 
+	// Templates word ticket titles and descriptions and change notes.
+	// Default the built-in templates.
+	Templates *Templates
+
 	// HandoverLockTimeout bounds the wait for another alert group's lock
 	// when moving alerts off its orphaned ticket. Default 10 seconds.
 	HandoverLockTimeout time.Duration
@@ -210,6 +214,9 @@ type Observer interface {
 	// PriorityOverridden is called once for each ticket found to have a
 	// priority override.
 	PriorityOverridden()
+	// TemplateFailed is called with a ticket template's name when the
+	// templates file's definition fails and the built-in one is used instead.
+	TemplateFailed(template string)
 }
 
 type noopObserver struct{}
@@ -219,6 +226,7 @@ func (noopObserver) AlertsMoved(int)        {}
 func (noopObserver) OrphanCompleted()       {}
 func (noopObserver) PriorityChanged(string) {}
 func (noopObserver) PriorityOverridden()    {}
+func (noopObserver) TemplateFailed(string)  {}
 
 // Receiver applies notifications to Autotask.
 type Receiver struct {
@@ -254,6 +262,13 @@ func New(at Autotask, matcher CompanyMatcher, locker Locker, opts Options) (*Rec
 	}
 	if opts.TracerProvider == nil {
 		opts.TracerProvider = otel.GetTracerProvider()
+	}
+	if opts.Templates == nil {
+		t, err := ParseTemplates("", nil)
+		if err != nil {
+			return nil, err
+		}
+		opts.Templates = t
 	}
 
 	return &Receiver{at: at, matcher: matcher, locker: locker, opts: opts, tracer: opts.TracerProvider.Tracer(TracerScope)}, nil
@@ -401,14 +416,18 @@ func (r *Receiver) update(ctx context.Context, n Notification, t Ticket) (change
 	if noted {
 		value, overflow := encodeRecorded(keys(recorded))
 
-		title := noteTitle(len(fired), len(resolved))
-		if groupResolved {
-			title = "Alert group resolved: " + title
+		severity, _ := r.severity(n, alertsWithStatus(n.Alerts, statusFiring))
+		data := NoteData{
+			Group:         group(n, severity),
+			Fired:         alertData(fired),
+			Resolved:      alertData(resolved),
+			GroupResolved: groupResolved,
+			TicketNumber:  t.Number,
 		}
 		if err := r.at.CreateNote(ctx, NewNote{
 			TicketID:    t.ID,
-			Title:       truncate(title, maxNoteTitle),
-			Description: noteDescription(n, fired, resolved, overflow, pc.note),
+			Title:       truncate(r.render(ctx, TemplateNoteTitle, data), maxNoteTitle),
+			Description: truncate(withNotices(noteNotices(overflow, pc.note), r.render(ctx, TemplateNoteDescription, data)), maxNoteDescription),
 			NoteType:    r.opts.NoteType,
 			Publish:     r.opts.NotePublish,
 		}); err != nil {
@@ -457,12 +476,14 @@ func (r *Receiver) create(ctx context.Context, n Notification, externalID string
 		span.SetAttributes(attribute.String("am_autotask.catchall", catchAll))
 	}
 	recorded, overflow := encodeRecorded(fingerprints(firing))
-	_, priority := r.severity(n, firing)
+	severity, priority := r.severity(n, firing)
+	data := TicketData{Group: group(n, severity), Alerts: alertData(firing)}
+	notices := ticketNotices(ambiguous, previous, orphanTickets(orphans), overflow)
 
 	t := NewTicket{
 		CompanyID:      companyID,
-		Title:          ticketTitle(n),
-		Description:    ticketDescription(n, firing, ambiguous, previous, orphanTickets(orphans), overflow),
+		Title:          truncate(r.render(ctx, TemplateTicketTitle, data), maxTicketTitle),
+		Description:    truncate(withNotices(notices, r.render(ctx, TemplateTicketDescription, data)), maxTicketDescription),
 		ExternalID:     externalID,
 		Priority:       priority,
 		Status:         r.opts.Status,

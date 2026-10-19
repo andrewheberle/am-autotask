@@ -109,6 +109,9 @@ func (c *serveCommand) serve(ctx context.Context, cfg config.Config, logger *slo
 		}
 	}()
 
+	zone, _ := time.Now().Zone()
+	logger.Info("ticket templates format times in the local time zone", "zone", zone, "TZ", os.Getenv("TZ"))
+
 	g := &gate{}
 
 	// read by metrics scrapes, which may happen before the cache exists

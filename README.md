@@ -23,11 +23,80 @@ See [GLOSSARY.md](GLOSSARY.md) for the terms used here.
 ## Ticket contents
 
 - **Title.** The alert name followed by the remaining group labels, for example `KubePodCrashLooping {cluster="prod", namespace="payments"}`.
-- **Description.** The `summary` and `description` annotations when every alert shares them, then the group labels, a link to the alerts in Alertmanager (when Alertmanager sends its `externalURL`), and each firing alert with its labels, summary, start time and source link.
+- **Description.** Any system notices first (see below), then the `summary` and `description` annotations when every alert shares them, then the group labels, a link to the alerts in Alertmanager (when Alertmanager sends its `externalURL`), and each firing alert with its labels, summary, start time and source link.
 - **Runbooks.** An alert's `runbook_url` annotation is shown so the service desk can follow it. A runbook shared by every alert is shown once, near the top of the description as `Runbook: <url>`; otherwise each alert's runbook is shown under that alert. Notes show the runbooks of newly firing alerts, unless it is the runbook every alert shares, and never for resolved or moved alerts. The value is shown as written, without checking that it is a valid URL.
 - **Notes.** Titled with the number of alerts that fired and resolved, for example `1 firing, 0 resolved`, prefixed with `Alert group resolved:` when the whole group has resolved, and listing each alert. When the ticket's priority follows severity, a note also says when the priority was raised or lowered, or that a person changed it.
 
+- **System notices.** Explanations of something am-autotask did or detected come first in a description or note: a ticket raised against the catch-all company because several companies matched, the group's previous ticket, the orphaned tickets a ticket continues, alerts no longer recorded individually, and priority changes. [Ticket templates](#ticket-templates) cannot remove them (see [ADR-0005](docs/adr/0005-system-notices-stay-outside-ticket-templates.md)).
+
 Text longer than Autotask allows is cut short, ending with `… (truncated)`.
+
+## Ticket templates
+
+The wording of ticket titles, ticket descriptions and change notes (the notes recording alerts firing and resolving) can be replaced with [Go templates](https://pkg.go.dev/text/template). Set `templates` to a file that defines any of these blocks:
+
+| Block | Data | Used for |
+| --- | --- | --- |
+| `ticket.title` | Ticket | Title of a new ticket. Made a single line. |
+| `ticket.description` | Ticket | Description of a new ticket, after any system notices. |
+| `note.title` | Note | Title of a change note. Made a single line. |
+| `note.description` | Note | Description of a change note, after any system notices. |
+
+A block the file does not define keeps its [built-in definition](internal/receiver/templates/default.tmpl), so a file can change just the title:
+
+```gotemplate
+{{define "ticket.title"}}[{{upper .GroupLabels.tenant_id}}] {{.CommonAnnotations.summary}}{{end}}
+```
+
+Other notes, such as the one on an orphaned ticket naming where its alerts moved, keep their fixed wording.
+
+### Template data
+
+These fields are a stable interface: renaming or removing one is a breaking change.
+
+| Field | Data | Description |
+| --- | --- | --- |
+| `.Receiver` | All | Alertmanager receiver name. |
+| `.Status` | All | `firing` or `resolved`, for the whole alert group. |
+| `.GroupLabels`, `.CommonLabels`, `.CommonAnnotations` | All | Maps from the notification, e.g. `.GroupLabels.cluster`. |
+| `.ExternalURL` | All | Alertmanager's external URL. |
+| `.AlertmanagerURL` | All | Link to the receiver's alerts in Alertmanager, or empty without an external URL. |
+| `.Severity` | All | The alert group's severity when the template is executed. For a ticket that is when it was raised; it does not change with the ticket's priority later. |
+| `.Alerts` | Ticket | The firing alerts. |
+| `.Fired`, `.Resolved` | Note | Alerts that fired and resolved since the last note. |
+| `.GroupResolved` | Note | Set when the whole alert group has resolved. |
+| `.TicketNumber` | Note | The ticket's number, e.g. `T20261019.0001`. |
+
+Each alert has `.Name` (its `alertname` label), `.Status`, `.Labels`, `.Annotations`, `.StartsAt`, `.EndsAt` (zero while firing; check with `.EndsAt.IsZero`), `.GeneratorURL` and `.Fingerprint`.
+
+A label or annotation that is not set is an empty string.
+
+### Functions
+
+As well as Go's [built-in functions](https://pkg.go.dev/text/template#hdr-Functions):
+
+| Function | Example | Description |
+| --- | --- | --- |
+| `labels MAP [EXCLUDE...]` | `{{labels .Labels $.GroupLabels "severity"}}` | Labels in Prometheus selector syntax, sorted, e.g. `{instance="web1", job="node"}`. Each exclusion is a label name or a map whose keys are left out. |
+| `time TIME [LAYOUT]` | `{{time .StartsAt}}` | A time in the local time zone, laid out as `2006-01-02 15:04:05 MST` or the given [layout](https://pkg.go.dev/time#pkg-constants). |
+| `default DEFAULT VALUE` | `{{default "unknown" .CommonLabels.team}}` | VALUE, or DEFAULT when VALUE is empty. |
+| `truncate N STRING` | `{{truncate 80 .CommonAnnotations.summary}}` | STRING cut to N characters, ending with `… (truncated)` when anything was removed. |
+| `trim STRING` | `{{trim .Annotations.runbook_url}}` | STRING without leading and trailing whitespace. |
+| `upper STRING`, `lower STRING` | `{{upper .GroupLabels.tenant_id}}` | STRING in upper or lower case. |
+
+The local time zone comes from the `TZ` environment variable, such as `TZ=Australia/Perth`, or else the host's time zone; the container image uses UTC unless `TZ` is set. Time zone data is built in, so `TZ` works on hosts and images without it. An unknown `TZ` stops `serve` at startup, rather than silently falling back to UTC. On Windows `TZ` is ignored and the system time zone is used.
+
+### Errors and previews
+
+Every block in the templates file is executed against a sample notification at startup, and `serve` will not start if one fails. A block that still fails on a real notification, for example by indexing past the end of `.Alerts`, is replaced by its built-in definition for that ticket or note; the error is logged and counted in `am_autotask_template_errors_total`. A title that renders empty also falls back to the built-in definition. Descriptions lose trailing whitespace, and everything is cut to Autotask's limits after rendering.
+
+The templates file is read at startup; restart to apply changes. To see what the templates produce without raising tickets, run:
+
+```sh
+am-autotask templates --templates templates.tmpl [--notification webhook.json]
+```
+
+This prints every block rendered for a built-in sample notification, or for an Alertmanager webhook payload saved as JSON, treating its firing alerts as a new ticket and all its alerts as a change note. System notices are not shown. `templates` is also read from `--config` and `AM_AUTOTASK_TEMPLATES`.
 
 ## Autotask setup
 
@@ -176,6 +245,7 @@ Each secret can be given directly or as a path to a file containing it, which su
 | `ticket.resolvedstatus` | `5` (*Complete*) | Status ID set when the whole group resolves. `0` leaves the status unchanged. |
 | `note.type` | `1` (*Task Summary*) | Note type ID of ticket notes. |
 | `note.publish` | `2` (*Internal Project Team*) | Publish (visibility) ID of ticket notes. |
+| `templates` | | Path to a file of [ticket templates](#ticket-templates). Optional; the built-in wording applies when unset. |
 
 The defaults for status, type, source, note type and publish are Autotask system values, so they exist on every instance. Priorities, queues, issue types, categories and work types differ between instances, so they have no defaults.
 
@@ -258,7 +328,7 @@ Log lines written while handling a notification carry its `trace_id` and `span_i
 
 ## Running
 
-The receiver runs as the `serve` subcommand, which takes the flags under [Configuration](#configuration); the `lookup` commands are described under [Finding IDs](#finding-ids). Before v0.5.0 the receiver ran without a subcommand, so add `serve` before any existing arguments when upgrading. `am-autotask --version` prints the version.
+The receiver runs as the `serve` subcommand, which takes the flags under [Configuration](#configuration); the `lookup` commands are described under [Finding IDs](#finding-ids), and the `templates` command under [Ticket templates](#errors-and-previews). Before v0.5.0 the receiver ran without a subcommand, so add `serve` before any existing arguments when upgrading. `am-autotask --version` prints the version.
 
 ```sh
 am-autotask serve --config config.yaml
@@ -284,7 +354,7 @@ docker run -v ./config.yaml:/etc/am-autotask/config.yaml \
 | `POST /webhook` | Alertmanager webhook receiver. Requires `Authorization: Bearer <webhook.token>`. |
 | `GET /healthz` | Always `200` while the process is running. |
 | `GET /readyz` | `200` once Autotask has been reached, configuration validated and company selectors loaded. Until then notifications are answered with `500`, so Alertmanager retries them. |
-| `GET /metrics` | Prometheus metrics, prefixed `am_autotask_`: notifications by result, tickets and notes created, alerts moved off orphaned tickets and orphaned tickets completed, tickets raised against the catch-all company, Autotask errors and request durations by operation, readiness, and the age and validity of the company selectors. See [Monitoring](docs/monitoring.md) for what they mean, ready-made alerting rules and a Grafana dashboard. |
+| `GET /metrics` | Prometheus metrics, prefixed `am_autotask_`: notifications by result, tickets and notes created, alerts moved off orphaned tickets and orphaned tickets completed, tickets raised against the catch-all company, Autotask errors and request durations by operation, ticket templates that failed, readiness, and the age and validity of the company selectors. See [Monitoring](docs/monitoring.md) for what they mean, ready-made alerting rules and a Grafana dashboard. |
 
 ## Limitations
 

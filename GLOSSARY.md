@@ -59,5 +59,17 @@ The firing alerts a ticket has already noted, against which each notification is
 _Avoid_: Known alerts, alert state, cache
 
 **Ticket Note**:
-An entry on a ticket recording a change in its alert group's membership or state.
+Any entry am-autotask adds to a ticket.
 _Avoid_: Comment, update
+
+**Change Note**:
+A ticket note recording alerts firing or resolving in its alert group, or the whole group resolving.
+_Avoid_: Status note, alert note
+
+**System Notice**:
+Fixed wording on a ticket or ticket note explaining something am-autotask did or detected, such as raising against the catch-all company or no longer recording alerts. A ticket template cannot remove it.
+_Avoid_: Warning, banner
+
+**Ticket Template**:
+Operator-supplied wording for a ticket's title and description, or for a change note's title and description. Where none is supplied, the built-in wording applies.
+_Avoid_: Format, layout

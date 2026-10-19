@@ -1,0 +1,76 @@
+{{- /*
+Built-in ticket templates. A templates file given with --templates may
+redefine any of these blocks; the rest keep the definitions here.
+*/ -}}
+
+{{define "ticket.title" -}}
+{{default (default "Alert group" .CommonLabels.alertname) .GroupLabels.alertname}}
+{{- with labels .GroupLabels "alertname"}}{{if ne . "{}"}} {{.}}{{end}}{{end}}
+{{- end}}
+
+{{define "ticket.description" -}}
+{{with .CommonAnnotations.summary}}{{.}}
+{{end -}}
+{{with .CommonAnnotations.description}}{{.}}
+{{end -}}
+{{if or .CommonAnnotations.summary .CommonAnnotations.description}}
+{{end -}}
+{{with trim .CommonAnnotations.runbook_url}}Runbook: {{.}}
+
+{{end -}}
+Group labels: {{labels .GroupLabels}}
+{{with .AlertmanagerURL}}Alertmanager: {{.}}
+{{end}}
+Firing ({{len .Alerts}}):
+{{range .Alerts -}}
+- {{.Name}} {{labels .Labels $.GroupLabels "alertname"}}
+{{- with .Annotations.summary}}
+  {{.}}
+{{- end}}
+{{- with trim .Annotations.runbook_url}}{{if ne . (trim $.CommonAnnotations.runbook_url)}}
+  Runbook: {{.}}
+{{- end}}{{end}}
+  Started: {{.StartsAt.UTC.Format "2006-01-02T15:04:05Z07:00"}}
+{{- with .GeneratorURL}}
+  Source: {{.}}
+{{- end}}
+{{end -}}
+{{end}}
+
+{{define "note.title" -}}
+{{if .GroupResolved}}Alert group resolved: {{end}}{{len .Fired}} firing, {{len .Resolved}} resolved
+{{- end}}
+
+{{define "note.description" -}}
+{{if .Fired}}Firing ({{len .Fired}}):
+{{range .Fired -}}
+- {{.Name}} {{labels .Labels $.GroupLabels "alertname"}}
+{{- with .Annotations.summary}}
+  {{.}}
+{{- end}}
+{{- with trim .Annotations.runbook_url}}{{if ne . (trim $.CommonAnnotations.runbook_url)}}
+  Runbook: {{.}}
+{{- end}}{{end}}
+  Started: {{.StartsAt.UTC.Format "2006-01-02T15:04:05Z07:00"}}
+{{- with .GeneratorURL}}
+  Source: {{.}}
+{{- end}}
+{{end -}}
+{{end -}}
+{{if .Resolved}}{{if .Fired}}
+{{end}}Resolved ({{len .Resolved}}):
+{{range .Resolved -}}
+- {{.Name}} {{labels .Labels $.GroupLabels "alertname"}}
+{{- with .Annotations.summary}}
+  {{.}}
+{{- end}}
+  Started: {{.StartsAt.UTC.Format "2006-01-02T15:04:05Z07:00"}}
+{{- if not .EndsAt.IsZero}}
+  Ended: {{.EndsAt.UTC.Format "2006-01-02T15:04:05Z07:00"}}
+{{- end}}
+{{- with .GeneratorURL}}
+  Source: {{.}}
+{{- end}}
+{{end -}}
+{{end -}}
+{{end}}

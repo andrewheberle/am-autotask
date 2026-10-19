@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -108,6 +109,29 @@ func AddFlags(f *pflag.FlagSet) {
 
 	f.Int("note.type", 1, "note type ID of ticket notes")
 	f.Int("note.publish", 2, "publish (visibility) ID of ticket notes")
+
+	f.String("templates", "", "path to a file of ticket templates overriding the built-in wording (optional)")
+}
+
+// AddTemplatesFlags adds the flags for the configuration file and the
+// templates file to f, for previewing ticket templates.
+func AddTemplatesFlags(f *pflag.FlagSet) {
+	f.String("config", "", "path to YAML configuration file")
+	f.String("templates", "", "path to a file of ticket templates overriding the built-in wording (optional)")
+}
+
+// TemplatesFromFlags loads only the templates file path from f, which holds
+// the flags added by [AddTemplatesFlags] already parsed, in the same way as
+// [FromFlags], and checks the TZ environment variable.
+func TemplatesFromFlags(f *pflag.FlagSet) (string, error) {
+	k, err := configger.LoadConfig(f, configger.WithEnvPrefix(EnvPrefix))
+	if err != nil {
+		return "", err
+	}
+	if err := CheckTZ(os.Getenv("TZ")); err != nil {
+		return "", err
+	}
+	return k.String("templates"), nil
 }
 
 // FromFlags loads the configuration from f, which holds the flags added by
@@ -197,6 +221,14 @@ func FromFlags(f *pflag.FlagSet) (Config, error) {
 	if cfg.Refresh <= 0 {
 		errs = append(errs, errors.New("company.refresh must be positive"))
 	}
+	if err := CheckTZ(os.Getenv("TZ")); err != nil {
+		errs = append(errs, err)
+	}
+	if path := k.String("templates"); path != "" {
+		if cfg.Receiver.Templates, err = receiver.ParseTemplates(path, time.Local); err != nil {
+			errs = append(errs, fmt.Errorf("templates: %w", err))
+		}
+	}
 
 	if len(errs) > 0 {
 		return Config{}, &invalidError{errs}
@@ -237,6 +269,29 @@ func severityOrderErrors(r receiver.Options) []error {
 		errs = append(errs, fmt.Errorf("ticket.severityorder must list %q from ticket.priorities", s))
 	}
 	return errs
+}
+
+// CheckTZ reports a TZ environment variable value naming a time zone that
+// cannot be loaded, which Go would otherwise silently replace with UTC.
+func CheckTZ(tz string) error {
+	tz = strings.TrimPrefix(tz, ":")
+	if tz == "" {
+		return nil
+	}
+
+	var err error
+	if filepath.IsAbs(tz) {
+		var b []byte
+		if b, err = os.ReadFile(tz); err == nil {
+			_, err = time.LoadLocationFromTZData(tz, b)
+		}
+	} else {
+		_, err = time.LoadLocation(tz)
+	}
+	if err != nil {
+		return fmt.Errorf("TZ environment variable %q is not a time zone: %w", tz, err)
+	}
+	return nil
 }
 
 // AutotaskFromFlags loads only the Autotask API settings from f, which holds

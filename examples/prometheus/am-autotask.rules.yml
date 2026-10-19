@@ -170,3 +170,12 @@ groups:
           summary: Some company selectors cannot be parsed
           description: '{{ if eq $value 1.0 }}1 company has{{ else }}{{ $value }} companies have{{ end }} company selectors {{ $labels.instance }} cannot parse, so no alert groups are matched to them.'
           runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskinvalidcompanyselectors
+
+      - alert: AmAutotaskTemplateErrors
+        expr: sum by (instance, template) (increase(am_autotask_template_errors_total{job="am-autotask"}[1h])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: Ticket templates are failing
+          description: The {{ $labels.template }} template on {{ $labels.instance }} failed in the last hour, so the built-in wording was used instead.
+          runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotasktemplateerrors

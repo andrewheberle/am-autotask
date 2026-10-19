@@ -5,6 +5,8 @@ package main
 import (
 	"context"
 	"os"
+	// time zones for TZ on hosts without zoneinfo
+	_ "time/tzdata"
 
 	"github.com/andrewheberle/am-autotask/internal/cli"
 )

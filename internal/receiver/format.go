@@ -1,6 +1,7 @@
 package receiver
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"slices"
@@ -17,9 +18,6 @@ const (
 )
 
 const truncatedMarker = "… (truncated)"
-
-// runbookAnnotation links an alert to its runbook.
-const runbookAnnotation = "runbook_url"
 
 // truncate cuts s to at most max characters, ending with a visible marker
 // when anything was removed.
@@ -50,92 +48,64 @@ func formatLabels(labels map[string]string, exclude map[string]string) string {
 	return "{" + strings.Join(pairs, ", ") + "}"
 }
 
-func alertName(n Notification) string {
-	if name := n.GroupLabels["alertname"]; name != "" {
-		return name
+// render executes a ticket template and tidies the result. A failing
+// template from the templates file falls back to the built-in one, and so
+// does a title that renders empty.
+func (r *Receiver) render(ctx context.Context, name string, data any) string {
+	out, err := r.opts.Templates.render(name, data)
+	if err != nil {
+		r.opts.Logger.ErrorContext(ctx, "ticket template failed; using the built-in template", "template", name, "error", err)
+		r.opts.Observer.TemplateFailed(name)
 	}
-	if name := n.CommonLabels["alertname"]; name != "" {
-		return name
+	out = tidy(name, out)
+	if out == "" && strings.HasSuffix(name, ".title") {
+		r.opts.Logger.WarnContext(ctx, "ticket template rendered an empty title; using the built-in template", "template", name)
+		builtin, _ := r.opts.Templates.renderBuiltin(name, data)
+		out = tidy(name, builtin)
 	}
-	return "Alert group"
+	return out
 }
 
-func ticketTitle(n Notification) string {
-	title := alertName(n)
-	if rest := formatLabels(n.GroupLabels, map[string]string{"alertname": ""}); rest != "{}" {
-		title += " " + rest
+// withNotices puts system notices ahead of a rendered description, where a
+// template cannot leave them out (ADR-0005).
+func withNotices(notices []string, body string) string {
+	if len(notices) == 0 {
+		return body
 	}
-	return truncate(title, maxTicketTitle)
+	return strings.Join(notices, "\n\n") + "\n\n" + body
 }
 
-func ticketDescription(n Notification, firing []Alert, ambiguous []int64, previous *Ticket, continues []Ticket, overflow bool) string {
-	var b strings.Builder
-
-	if s := n.CommonAnnotations["summary"]; s != "" {
-		b.WriteString(s + "\n")
-	}
-	if d := n.CommonAnnotations["description"]; d != "" {
-		b.WriteString(d + "\n")
-	}
-	if b.Len() > 0 {
-		b.WriteString("\n")
-	}
-	if rb := runbook(n.CommonAnnotations); rb != "" {
-		fmt.Fprintf(&b, "Runbook: %s\n\n", rb)
-	}
-
-	fmt.Fprintf(&b, "Group labels: %s\n", formatLabels(n.GroupLabels, nil))
-	if link := alertmanagerLink(n); link != "" {
-		fmt.Fprintf(&b, "Alertmanager: %s\n", link)
-	}
-
+// ticketNotices are the system notices for a new ticket.
+func ticketNotices(ambiguous []int64, previous *Ticket, continues []Ticket, overflow bool) []string {
+	var notices []string
 	if len(ambiguous) > 0 {
-		fmt.Fprintf(&b, "\nNOTE: this alert group matched the company selectors of more than one company (IDs %s) so it was raised against the catch-all company. Correct the company selectors so only one company matches.\n",
-			joinIDs(ambiguous))
+		notices = append(notices, fmt.Sprintf("NOTE: this alert group matched the company selectors of more than one company (IDs %s) so it was raised against the catch-all company. Correct the company selectors so only one company matches.",
+			joinIDs(ambiguous)))
 	}
 	if previous != nil {
-		fmt.Fprintf(&b, "\nPrevious ticket for this alert group: %s\n", previous.Number)
+		notices = append(notices, "Previous ticket for this alert group: "+previous.Number)
 	}
 	if len(continues) > 0 {
-		fmt.Fprintf(&b, "\nContinues %s: alerts recorded there now belong to this alert group, usually after a change to Alertmanager's routes or group_by.\n",
-			joinNumbers(continues))
+		notices = append(notices, fmt.Sprintf("Continues %s: alerts recorded there now belong to this alert group, usually after a change to Alertmanager's routes or group_by.",
+			joinNumbers(continues)))
 	}
 	if overflow {
-		b.WriteString("\nNOTE: " + overflowNotice + "\n")
+		notices = append(notices, "NOTE: "+overflowNotice)
 	}
-
-	fmt.Fprintf(&b, "\nFiring (%d):\n", len(firing))
-	writeAlerts(&b, n, firing, true)
-
-	return truncate(b.String(), maxTicketDescription)
+	return notices
 }
 
-func noteTitle(fired, resolved int) string {
-	return fmt.Sprintf("%d firing, %d resolved", fired, resolved)
-}
-
-func noteDescription(n Notification, fired, resolved []Alert, overflow bool, priority string) string {
-	var b strings.Builder
-
+// noteNotices are the system notices for a change note: overflow, and the
+// line describing any priority change.
+func noteNotices(overflow bool, priority string) []string {
+	var notices []string
 	if overflow {
-		b.WriteString("NOTE: " + overflowNotice + "\n\n")
+		notices = append(notices, "NOTE: "+overflowNotice)
 	}
 	if priority != "" {
-		b.WriteString(priority + "\n\n")
+		notices = append(notices, priority)
 	}
-	if len(fired) > 0 {
-		fmt.Fprintf(&b, "Firing (%d):\n", len(fired))
-		writeAlerts(&b, n, fired, true)
-	}
-	if len(resolved) > 0 {
-		if b.Len() > 0 {
-			b.WriteString("\n")
-		}
-		fmt.Fprintf(&b, "Resolved (%d):\n", len(resolved))
-		writeAlerts(&b, n, resolved, false)
-	}
-
-	return truncate(b.String(), maxNoteDescription)
+	return notices
 }
 
 func movedTitle(moved int, current Ticket, emptied bool) string {
@@ -157,7 +127,7 @@ func movedDescription(n Notification, moved []Alert, current Ticket, emptied boo
 		fmt.Fprintf(&b, "No alerts remain on this ticket; further changes are recorded on %s.\n", current.Number)
 	}
 	fmt.Fprintf(&b, "\nMoved (%d):\n", len(moved))
-	writeAlerts(&b, n, moved, false)
+	writeAlerts(&b, n, moved)
 
 	return truncate(b.String(), maxNoteDescription)
 }
@@ -182,23 +152,12 @@ func alertmanagerLink(n Notification) string {
 	return strings.TrimSuffix(n.ExternalURL, "/") + "/#/alerts?receiver=" + url.QueryEscape(n.Receiver)
 }
 
-// runbook returns the runbook link in annotations, or "" if there is none.
-func runbook(annotations map[string]string) string {
-	return strings.TrimSpace(annotations[runbookAnnotation])
-}
-
-// writeAlerts lists alerts. With runbooks, each alert's runbook is shown
-// unless it is the runbook shared by the whole notification, which the ticket
-// description shows once.
-func writeAlerts(b *strings.Builder, n Notification, alerts []Alert, runbooks bool) {
-	shared := runbook(n.CommonAnnotations)
+// writeAlerts lists alerts for system notes.
+func writeAlerts(b *strings.Builder, n Notification, alerts []Alert) {
 	for _, a := range alerts {
 		fmt.Fprintf(b, "- %s %s\n", a.Labels["alertname"], formatLabels(a.Labels, withAlertname(n.GroupLabels)))
 		if s := a.Annotations["summary"]; s != "" {
 			fmt.Fprintf(b, "  %s\n", s)
-		}
-		if rb := runbook(a.Annotations); runbooks && rb != "" && rb != shared {
-			fmt.Fprintf(b, "  Runbook: %s\n", rb)
 		}
 		fmt.Fprintf(b, "  Started: %s\n", a.StartsAt.UTC().Format(time.RFC3339))
 		if a.Status == statusResolved && !a.EndsAt.IsZero() {

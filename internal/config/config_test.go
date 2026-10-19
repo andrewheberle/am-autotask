@@ -506,3 +506,66 @@ func TestSeverityOrderFromEnv(t *testing.T) {
 		t.Errorf("SeverityOrder = %v, want %v", cfg.Receiver.SeverityOrder, want)
 	}
 }
+
+func TestTemplates(t *testing.T) {
+	tests := []struct {
+		name    string
+		src     string
+		wantErr string
+	}{
+		{name: "valid", src: `{{define "ticket.title"}}{{.Receiver}}{{end}}`},
+		{name: "invalid", src: `{{define "ticket.title"}}{{.Nope}}{{end}}`, wantErr: "templates: executing templates"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := loadArgs([]string{"--config", writeFile(t, "c.yaml", minimalYAML), "--templates", writeFile(t, "t.tmpl", tt.src)})
+
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("err = %v, want one containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.Receiver.Templates == nil {
+				t.Error("Templates should be loaded from the file")
+			}
+		})
+	}
+
+	t.Run("built-in when unset", func(t *testing.T) {
+		if cfg := load(t, "--config", writeFile(t, "c.yaml", minimalYAML)); cfg.Receiver.Templates != nil {
+			t.Error("Templates should be nil, leaving the receiver's built-in templates")
+		}
+	})
+}
+
+func TestCheckTZ(t *testing.T) {
+	tests := []struct {
+		tz      string
+		wantErr bool
+	}{
+		{tz: ""},
+		{tz: "UTC"},
+		{tz: "Australia/Perth"},
+		{tz: ":Australia/Perth"},
+		{tz: "Australia/Pert", wantErr: true},
+		{tz: "/nonexistent/zoneinfo", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.tz, func(t *testing.T) {
+			if err := config.CheckTZ(tt.tz); (err != nil) != tt.wantErr {
+				t.Errorf("CheckTZ(%q) = %v, want error %v", tt.tz, err, tt.wantErr)
+			}
+		})
+	}
+
+	t.Run("checked when loading", func(t *testing.T) {
+		t.Setenv("TZ", "Australia/Pert")
+		if _, err := loadArgs([]string{"--config", writeFile(t, "c.yaml", minimalYAML)}); err == nil || !strings.Contains(err.Error(), "TZ environment variable") {
+			t.Errorf("err = %v, want one about TZ", err)
+		}
+	})
+}

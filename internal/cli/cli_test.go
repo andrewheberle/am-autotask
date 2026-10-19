@@ -29,6 +29,10 @@ func TestExecute(t *testing.T) {
 		{name: "lookup worktypes takes no arguments", args: []string{"lookup", "worktypes", "extra"}, wantMsg: "unknown command"},
 		{name: "lookup worktypes needs only Autotask settings", args: []string{"lookup", "worktypes"}, wantMsg: "autotask.username"},
 		{name: "lookup does not take receiver flags", args: []string{"lookup", "picklists", "--ticket.queue=8"}, wantMsg: "unknown flag: --ticket.queue"},
+		{name: "templates takes no arguments", args: []string{"templates", "extra"}, wantMsg: "unknown command"},
+		{name: "templates reports a missing file", args: []string{"templates", "--templates", "/nonexistent/templates.tmpl"}, wantMsg: "reading templates"},
+		{name: "templates reports a missing notification", args: []string{"templates", "--notification", "/nonexistent/webhook.json"}, wantMsg: "reading notification"},
+		{name: "templates does not take receiver flags", args: []string{"templates", "--ticket.queue=8"}, wantMsg: "unknown flag: --ticket.queue"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

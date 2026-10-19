@@ -30,6 +30,7 @@ All am-autotask metrics are prefixed `am_autotask_`. The standard Go runtime (`g
 | `am_autotask_catchall_tickets_total` | counter | `reason` | Tickets raised against the catch-all company: `unmatched` (no company's selectors matched the alert group) or `ambiguous` (more than one company's did). |
 | `am_autotask_ticket_priority_changes_total` | counter | `direction` | Ticket priorities changed to follow their alert group's severity, `raised` or `lowered`. Only counted when `ticket.appliedpriorityudf` is set. |
 | `am_autotask_ticket_priority_overrides_total` | counter | | Tickets found with a priority a person changed, which then no longer follows severity. Counted once per ticket. A high rate compared with `am_autotask_ticket_priority_changes_total` suggests `ticket.priorities` or `ticket.severityorder` doesn't match how the service desk prioritises. |
+| `am_autotask_template_errors_total` | counter | `template` | [Ticket templates](../README.md#ticket-templates) from the templates file that failed on a notification, so the built-in wording was used instead: `ticket.title`, `ticket.description`, `note.title` or `note.description`. Always zero without a templates file. |
 | `am_autotask_ready` | gauge | | `1` once startup has completed and notifications are being handled, otherwise `0`. |
 | `am_autotask_autotask_request_duration_seconds` | histogram | `operation` | Duration of Autotask operations made while handling notifications, with the same `operation` values as `am_autotask_autotask_errors_total`. An operation includes all of its pages and any read back, such as `create_ticket` reading the new ticket's number. |
 
@@ -77,7 +78,7 @@ Its rows are:
 - **Status**: am-autotask's own firing and pending alerts from the [alerting rules](#alerting-rules), readiness, the age of the company selectors and how many companies' selectors are valid. The alert list needs Grafana to read the rules from the data source, which it does for Prometheus and Mimir.
 - **Notifications**: notifications by result, the share failing, and Alertmanager's failed webhook deliveries. Like the query above, the last counts every webhook receiver.
 - **Autotask**: request duration and errors by operation.
-- **Tickets** (collapsed): tickets and notes created, catch-all tickets, priority changes compared with overrides, and orphaned tickets. These don't need anyone to act on them straight away; use them to tune company selectors and `ticket.priorities`.
+- **Tickets** (collapsed): tickets and notes created, catch-all tickets, priority changes compared with overrides, orphaned tickets, and ticket templates that failed. These don't need anyone to act on them straight away; use them to tune company selectors and `ticket.priorities`.
 
 When an alert fires, open its runbook below and use the dashboard to see when the problem started and how far it reaches.
 
@@ -127,6 +128,7 @@ The [alerting rules workflow](../.github/workflows/rules.yml) runs these checks 
 | [AmAutotaskAmbiguousCompanyMatch](#amautotaskambiguouscompanymatch) | warning | An alert group matched more than one company in the last hour. |
 | [AmAutotaskUnmatchedAlertGroups](#amautotaskunmatchedalertgroups) | info | An alert group matched no company in the last hour. |
 | [AmAutotaskInvalidCompanySelectors](#amautotaskinvalidcompanyselectors) | warning | A company's selectors have failed to parse for 15 minutes. |
+| [AmAutotaskTemplateErrors](#amautotasktemplateerrors) | warning | A ticket template from the templates file failed in the last hour. |
 
 ### Routing these alerts
 
@@ -256,3 +258,11 @@ Some companies' company selectors do not parse, so those companies are skipped a
 
 - Search am-autotask's logs for `skipping company with invalid company selectors`; each entry names the company and the parse error.
 - Correct the selectors in the company's UDF: one Alertmanager label selector per line, such as `{tenant_id="foo", site="bar"}`. The change is picked up at the next reload.
+
+### AmAutotaskTemplateErrors
+
+A block in the templates file failed on a real notification, although it passed against the sample notification at startup. The ticket or note was still written, using the built-in wording for that block, so nothing was lost, but it doesn't look the way the templates file intends.
+
+- Search am-autotask's logs for `ticket template failed`; each entry names the template and the error, such as an index past the end of `.Alerts` or a function given the wrong type.
+- Save the notification that failed (Alertmanager's webhook payload) as JSON and reproduce the error with `am-autotask templates --templates <file> --notification <payload>`.
+- Fix the block so it handles that notification, for example by checking a list's length before indexing it, and restart am-autotask.
