@@ -28,9 +28,10 @@ type fieldInfo struct {
 }
 
 // Validate checks that the configuration matches this Autotask instance: every
-// picklist ID exists and is active, every UDF exists, and the catch-all
-// company exists and is active. All problems are reported together.
-func (c *Client) Validate(ctx context.Context, checks []PicklistCheck, catchAllCompanyID int64) error {
+// picklist ID exists and is active, every UDF exists, the catch-all company
+// exists and is active, and the work type, unless zero, exists and is active.
+// All problems are reported together.
+func (c *Client) Validate(ctx context.Context, checks []PicklistCheck, catchAllCompanyID int64, workTypeID int) error {
 	var errs []error
 
 	fields := map[string][]fieldInfo{}
@@ -68,6 +69,12 @@ func (c *Client) Validate(ctx context.Context, checks []PicklistCheck, catchAllC
 
 	if err := c.checkCompany(ctx, catchAllCompanyID); err != nil {
 		errs = append(errs, err)
+	}
+
+	if workTypeID != 0 {
+		if err := c.checkWorkType(ctx, workTypeID); err != nil {
+			errs = append(errs, err)
+		}
 	}
 
 	return errors.Join(errs...)
@@ -141,4 +148,33 @@ func (c *Client) checkCompany(ctx context.Context, id int64) error {
 		return fmt.Errorf("catch-all company %d is inactive", id)
 	}
 	return nil
+}
+
+func (c *Client) checkWorkType(ctx context.Context, id int) error {
+	workTypes, err := c.WorkTypes(ctx, true)
+	if err != nil {
+		return fmt.Errorf("reading work types: %w", err)
+	}
+
+	var active []string
+	for _, wt := range workTypes {
+		if wt.Active {
+			active = append(active, fmt.Sprintf("%d (%s)", wt.ID, wt.Name))
+		}
+	}
+	values := "there are no active work types"
+	if len(active) > 0 {
+		values = "active work types are " + strings.Join(active, ", ")
+	}
+
+	for _, wt := range workTypes {
+		if wt.ID != id {
+			continue
+		}
+		if !wt.Active {
+			return fmt.Errorf("work type %d (%s) is inactive; %s", id, wt.Name, values)
+		}
+		return nil
+	}
+	return fmt.Errorf("work type %d does not exist; %s", id, values)
 }

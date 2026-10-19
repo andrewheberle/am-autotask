@@ -28,6 +28,14 @@ type Company struct {
 	Active bool
 }
 
+// WorkType is an Autotask work type, the billing code a ticket's work is
+// billed under.
+type WorkType struct {
+	ID     int
+	Name   string
+	Active bool
+}
+
 // Autotask is the part of the Autotask API lookups use.
 type Autotask interface {
 	// Picklists returns the values of every picklist field of entity, keyed
@@ -36,6 +44,9 @@ type Autotask interface {
 	// SearchCompanies returns the companies whose name contains name,
 	// ignoring case, including inactive companies if includeInactive is set.
 	SearchCompanies(ctx context.Context, name string, includeInactive bool) ([]Company, error)
+	// WorkTypes returns the work types, including inactive ones if
+	// includeInactive is set.
+	WorkTypes(ctx context.Context, includeInactive bool) ([]WorkType, error)
 }
 
 // picklist ties configuration settings to the Autotask picklist field they
@@ -146,6 +157,38 @@ func Companies(ctx context.Context, w io.Writer, at Autotask, name string, all b
 			out.printf("%d\t%s\t%s\n", c.ID, c.Name, yesNo(c.Active))
 		} else {
 			out.printf("%d\t%s\n", c.ID, c.Name)
+		}
+	}
+	return out.flush(tw)
+}
+
+// WorkTypes writes the IDs ticket.worktype may take to w, ordered by name.
+// Only active work types are written unless all is set.
+func WorkTypes(ctx context.Context, w io.Writer, at Autotask, all bool) error {
+	workTypes, err := at.WorkTypes(ctx, all)
+	if err != nil {
+		return fmt.Errorf("reading work types: %w", err)
+	}
+	if len(workTypes) == 0 {
+		_, err := fmt.Fprintln(w, "no work types")
+		return err
+	}
+	slices.SortStableFunc(workTypes, func(a, b WorkType) int {
+		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+	})
+
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	out := &errWriter{w: tw}
+	if all {
+		out.printf("ID\tNAME\tACTIVE\n")
+	} else {
+		out.printf("ID\tNAME\n")
+	}
+	for _, wt := range workTypes {
+		if all {
+			out.printf("%d\t%s\t%s\n", wt.ID, wt.Name, yesNo(wt.Active))
+		} else {
+			out.printf("%d\t%s\n", wt.ID, wt.Name)
 		}
 	}
 	return out.flush(tw)

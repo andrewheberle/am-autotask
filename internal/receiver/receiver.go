@@ -81,6 +81,7 @@ type NewTicket struct {
 	IssueType      int
 	SubIssueType   int
 	Category       int
+	WorkType       int
 	DueDateTime    *time.Time
 	RecordedAlerts string
 	// AppliedPriority is empty unless the priority follows severity.
@@ -159,6 +160,7 @@ type Options struct {
 	IssueType    int
 	SubIssueType int
 	Category     int
+	WorkType     int
 	DueIn        time.Duration
 
 	// ResolvedStatus is applied when the whole alert group resolves; zero
@@ -470,6 +472,7 @@ func (r *Receiver) create(ctx context.Context, n Notification, externalID string
 		IssueType:      r.opts.IssueType,
 		SubIssueType:   r.opts.SubIssueType,
 		Category:       r.opts.Category,
+		WorkType:       r.opts.WorkType,
 		RecordedAlerts: recorded,
 	}
 	if r.opts.FollowSeverity {

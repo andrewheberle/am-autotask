@@ -70,3 +70,29 @@ func (c *Client) SearchCompanies(ctx context.Context, name string, includeInacti
 	}
 	return companies, nil
 }
+
+// workTypeUse is the BillingCodes useType of work types, which Autotask calls
+// general allocation codes.
+const workTypeUse = 1
+
+// WorkTypes implements [lookup.Autotask].
+func (c *Client) WorkTypes(ctx context.Context, includeInactive bool) ([]lookup.WorkType, error) {
+	filters := []filter{{Op: "eq", Field: "useType", Value: workTypeUse}}
+	if !includeInactive {
+		filters = append(filters, filter{Op: "eq", Field: "isActive", Value: true})
+	}
+	items, err := query[struct {
+		ID       int    `json:"id"`
+		Name     string `json:"name"`
+		IsActive bool   `json:"isActive"`
+	}](ctx, c, "BillingCodes", filters, "id", "name", "isActive")
+	if err != nil {
+		return nil, err
+	}
+
+	workTypes := make([]lookup.WorkType, 0, len(items))
+	for _, item := range items {
+		workTypes = append(workTypes, lookup.WorkType{ID: item.ID, Name: item.Name, Active: item.IsActive})
+	}
+	return workTypes, nil
+}

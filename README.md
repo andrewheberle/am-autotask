@@ -36,9 +36,9 @@ Text longer than Autotask allows is cut short, ending with `… (truncated)`.
 3. **Create a Ticket UDF**, by default named `Alertmanager Recorded Alerts`. Use a text field. The receiver manages its contents; it should not be edited by hand.
 4. **Choose the catch-all company**, for example your own company, and note its ID. Your own company always has ID `0`. `am-autotask lookup companies` finds it (see [Finding IDs](#finding-ids)).
 5. **Optionally, create another Ticket UDF** for the applied priority, for example `Alertmanager Applied Priority`, if ticket priority should follow severity. Use a text field. The receiver manages its contents; it should not be edited by hand. See [Priority and severity](#priority-and-severity).
-6. **Find the picklist IDs** to use: the priority for each severity, plus any queue, issue type, sub-issue type or category you want. Configuration always uses numeric IDs, never labels, as labels vary by instance and language. The Autotask UI mostly shows labels, so use `am-autotask lookup picklists` to list the IDs.
+6. **Find the picklist IDs** to use: the priority for each severity, plus any queue, issue type, sub-issue type, category or work type you want. Configuration always uses numeric IDs, never labels, as labels vary by instance and language. The Autotask UI mostly shows labels, so use `am-autotask lookup picklists` to list the IDs, and `am-autotask lookup worktypes` for work types.
 
-At startup the receiver checks every configured ID against Autotask, along with every configured UDF and the catch-all company, and refuses to start if anything is missing or inactive. A rejected picklist ID is reported with the setting it came from and the active values of that picklist, for example `ticket.queue: Tickets queueID has no value 99; active values are 8 (Service Desk), 29682833 (Monitoring)`.
+At startup the receiver checks every configured ID against Autotask, along with every configured UDF and the catch-all company, and refuses to start if anything is missing or inactive. A rejected picklist ID is reported with the setting it came from and the active values of that picklist, for example `ticket.queue: Tickets queueID has no value 99; active values are 8 (Service Desk), 29682833 (Monitoring)`. A rejected work type is reported with the active work types in the same way.
 
 ### Finding IDs
 
@@ -70,7 +70,16 @@ ID   NAME
 175  XYZ Group Ltd
 ```
 
-Both list only active values and companies, as inactive ones are rejected at startup. `--all` includes inactive ones, with an `ACTIVE` column. With Docker, run the image with `lookup` in place of `serve`:
+`am-autotask lookup worktypes` lists the work types, for `ticket.worktype`. Work types aren't a picklist in Autotask, so `lookup picklists` doesn't show them:
+
+```console
+$ am-autotask lookup worktypes --config config.yaml
+ID        NAME
+29682805  After Hours Support
+29682801  Remote Support
+```
+
+All three list only active values, companies and work types, as inactive ones are rejected at startup. `--all` includes inactive ones, with an `ACTIVE` column. With Docker, run the image with `lookup` in place of `serve`:
 
 ```sh
 docker run --rm -v ./config.yaml:/etc/am-autotask/config.yaml \
@@ -162,12 +171,13 @@ Each secret can be given directly or as a path to a file containing it, which su
 | `ticket.issuetype` | | Issue type ID of new tickets. Optional. |
 | `ticket.subissuetype` | | Sub-issue type ID of new tickets. Optional; requires `ticket.issuetype`. |
 | `ticket.category` | | Ticket category ID. Optional; Autotask's default category applies when unset. |
+| `ticket.worktype` | | Work type ID of new tickets, sent as the ticket's `billingCodeID`. Optional; when unset none is sent, and Autotask or the ticket category decides. Set only when a ticket is created, so a work type changed by hand is kept. |
 | `ticket.duein` | | Due date of new tickets relative to creation, e.g. `4h`. Optional, but Autotask requires a due date unless the ticket category supplies one. |
 | `ticket.resolvedstatus` | `5` (*Complete*) | Status ID set when the whole group resolves. `0` leaves the status unchanged. |
 | `note.type` | `1` (*Task Summary*) | Note type ID of ticket notes. |
 | `note.publish` | `2` (*Internal Project Team*) | Publish (visibility) ID of ticket notes. |
 
-The defaults for status, type, source, note type and publish are Autotask system values, so they exist on every instance. Priorities, queues, issue types and categories differ between instances, so they have no defaults.
+The defaults for status, type, source, note type and publish are Autotask system values, so they exist on every instance. Priorities, queues, issue types, categories and work types differ between instances, so they have no defaults.
 
 ### Example
 

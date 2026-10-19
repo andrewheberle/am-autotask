@@ -151,16 +151,16 @@ func TestUnmappedSeverityUsesDefaultPriority(t *testing.T) {
 func TestOptionalTicketFieldsAreSentWhenConfigured(t *testing.T) {
 	at := newFakeAutotask()
 	opts := testOptions()
-	opts.QueueID, opts.IssueType, opts.SubIssueType, opts.Category = 8, 14, 140, 109
+	opts.QueueID, opts.IssueType, opts.SubIssueType, opts.Category, opts.WorkType = 8, 14, 140, 109, 29682801
 	opts.DueIn = 4 * time.Hour
 	r := newReceiver(t, at, opts)
 
 	handle(t, r, notification(hostAlert("aaaa", "firing", "web1")))
 
 	ticket := onlyTicket(t, at)
-	if ticket.QueueID != 8 || ticket.IssueType != 14 || ticket.SubIssueType != 140 || ticket.Category != 109 {
-		t.Errorf("queue/issue/subissue/category = %d/%d/%d/%d, want 8/14/140/109",
-			ticket.QueueID, ticket.IssueType, ticket.SubIssueType, ticket.Category)
+	if ticket.QueueID != 8 || ticket.IssueType != 14 || ticket.SubIssueType != 140 || ticket.Category != 109 || ticket.WorkType != 29682801 {
+		t.Errorf("queue/issue/subissue/category/worktype = %d/%d/%d/%d/%d, want 8/14/140/109/29682801",
+			ticket.QueueID, ticket.IssueType, ticket.SubIssueType, ticket.Category, ticket.WorkType)
 	}
 	if ticket.DueDateTime == nil || !ticket.DueDateTime.Equal(testTime.Add(4*time.Hour)) {
 		t.Errorf("DueDateTime = %v, want %v", ticket.DueDateTime, testTime.Add(4*time.Hour))
@@ -174,7 +174,7 @@ func TestOptionalTicketFieldsAreOmittedByDefault(t *testing.T) {
 	handle(t, r, notification(hostAlert("aaaa", "firing", "web1")))
 
 	ticket := onlyTicket(t, at)
-	if ticket.QueueID != 0 || ticket.IssueType != 0 || ticket.SubIssueType != 0 || ticket.Category != 0 || ticket.DueDateTime != nil {
+	if ticket.QueueID != 0 || ticket.IssueType != 0 || ticket.SubIssueType != 0 || ticket.Category != 0 || ticket.WorkType != 0 || ticket.DueDateTime != nil {
 		t.Errorf("optional fields should be unset, got %+v", ticket.NewTicket)
 	}
 }
