@@ -19,18 +19,25 @@ import (
 const (
 	selectorsUDF = "Alertmanager Selectors"
 	recordedUDF  = "Alertmanager Recorded Alerts"
+	appliedUDF   = "Alertmanager Applied Priority"
 )
 
 func newClient(t *testing.T, f *fakeServer) *autotask.Client {
 	t.Helper()
-	c, err := autotask.New(context.Background(), autotask.Options{
-		Username:            testUser,
-		Secret:              testSecret,
-		IntegrationCode:     testCode,
-		ZoneInformationURL:  f.zoneURL(),
-		CompanySelectorsUDF: selectorsUDF,
-		RecordedAlertsUDF:   recordedUDF,
-	})
+	return newClientWith(t, f, autotask.Options{})
+}
+
+// newClientWith returns a client for f with the test credentials and UDF
+// names set over opts.
+func newClientWith(t *testing.T, f *fakeServer, opts autotask.Options) *autotask.Client {
+	t.Helper()
+	opts.Username = testUser
+	opts.Secret = testSecret
+	opts.IntegrationCode = testCode
+	opts.ZoneInformationURL = f.zoneURL()
+	opts.CompanySelectorsUDF = selectorsUDF
+	opts.RecordedAlertsUDF = recordedUDF
+	c, err := autotask.New(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -202,6 +209,58 @@ func TestUpdateTicketChangesOnlyGivenFields(t *testing.T) {
 	}
 }
 
+func TestAppliedPriority(t *testing.T) {
+	tests := []struct {
+		name       string
+		appliedUDF string
+		applied    string
+		// the applied priority after creation, and after an update setting
+		// it to "override"
+		wantCreated, wantUpdated string
+	}{
+		{"following severity", appliedUDF, "4", "4", "override"},
+		{"not following severity", "", "", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFakeServer(t)
+			c := newClientWith(t, f, autotask.Options{AppliedPriorityUDF: tt.appliedUDF})
+
+			created, err := c.CreateTicket(ctx, receiver.NewTicket{
+				CompanyID: 1, Title: "a", ExternalID: "am:abc", Priority: 4, Status: 1,
+				RecordedAlerts: "aaaa", AppliedPriority: tt.applied,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if created.Priority != 4 || created.AppliedPriority != tt.wantCreated {
+				t.Errorf("created priority, applied = %d, %q; want 4, %q", created.Priority, created.AppliedPriority, tt.wantCreated)
+			}
+			stored := udf(f.get("Tickets", int(created.ID)), appliedUDF)
+			if (tt.wantCreated == "" && stored != nil) || (tt.wantCreated != "" && stored != tt.wantCreated) {
+				t.Errorf("stored applied priority = %v, want %q", stored, tt.wantCreated)
+			}
+
+			priority, recorded, override := 3, "aaaa,bbbb", "override"
+			if err := c.UpdateTicket(ctx, created.ID, receiver.TicketUpdate{
+				Priority: &priority, RecordedAlerts: &recorded, AppliedPriority: &override,
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			open, err := c.OpenTickets(ctx, "am:abc")
+			if err != nil || len(open) != 1 {
+				t.Fatalf("OpenTickets = %v, %v", open, err)
+			}
+			got := open[0]
+			if got.Priority != 3 || got.RecordedAlerts != "aaaa,bbbb" || got.AppliedPriority != tt.wantUpdated {
+				t.Errorf("updated ticket priority, recorded, applied = %d, %q, %q; want 3, %q, %q",
+					got.Priority, got.RecordedAlerts, got.AppliedPriority, "aaaa,bbbb", tt.wantUpdated)
+			}
+		})
+	}
+}
+
 func TestCreateNote(t *testing.T) {
 	f := newFakeServer(t)
 	c := newClient(t, f)
@@ -341,7 +400,7 @@ func validationServer(t *testing.T) *fakeServer {
 		picklist("noteType", pv(1, "Task Summary", true)),
 		picklist("publish", pv(2, "Internal Project Team", true)),
 	}
-	f.udfs["Tickets"] = []entity{{"name": recordedUDF}}
+	f.udfs["Tickets"] = []entity{{"name": recordedUDF}, {"name": appliedUDF}}
 	f.udfs["Companies"] = []entity{{"name": selectorsUDF}}
 	f.add("Companies", entity{"id": 1, "isActive": true})
 	return f
@@ -358,10 +417,21 @@ func goodChecks() []autotask.PicklistCheck {
 }
 
 func TestValidateAcceptsGoodConfiguration(t *testing.T) {
-	c := newClient(t, validationServer(t))
+	tests := []struct {
+		name string
+		opts autotask.Options
+	}{
+		{"not following severity", autotask.Options{}},
+		{"following severity", autotask.Options{AppliedPriorityUDF: appliedUDF}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newClientWith(t, validationServer(t), tt.opts)
 
-	if err := c.Validate(ctx, goodChecks(), 1); err != nil {
-		t.Errorf("Validate: %v", err)
+			if err := c.Validate(ctx, goodChecks(), 1); err != nil {
+				t.Errorf("Validate: %v", err)
+			}
+		})
 	}
 }
 
@@ -391,12 +461,16 @@ func TestValidateRejectsBadConfiguration(t *testing.T) {
 			return c
 		}, 1, selectorsUDF},
 		{"unknown catch-all company", func(_ *fakeServer, c []autotask.PicklistCheck) []autotask.PicklistCheck { return c }, 99, "catch-all company 99"},
+		{"missing applied priority UDF", func(f *fakeServer, c []autotask.PicklistCheck) []autotask.PicklistCheck {
+			f.udfs["Tickets"] = []entity{{"name": recordedUDF}}
+			return c
+		}, 1, appliedUDF},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := validationServer(t)
 			checks := tt.mutate(f, goodChecks())
-			c := newClient(t, f)
+			c := newClientWith(t, f, autotask.Options{AppliedPriorityUDF: appliedUDF})
 
 			err := c.Validate(ctx, checks, tt.catchAll)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {

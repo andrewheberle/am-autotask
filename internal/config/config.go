@@ -37,6 +37,8 @@ type Config struct {
 
 	CompanySelectorsUDF string
 	RecordedAlertsUDF   string
+	// AppliedPriorityUDF is empty unless ticket priority follows severity.
+	AppliedPriorityUDF string
 	Refresh             time.Duration
 	MissRefresh         time.Duration
 
@@ -90,7 +92,9 @@ func AddFlags(f *pflag.FlagSet) {
 	f.String("ticket.udf", "Alertmanager Recorded Alerts", "name of the Ticket UDF holding recorded alerts")
 	f.StringToInt("ticket.priorities", map[string]int{}, "severity to ticket priority ID map, e.g. critical=4,warning=2")
 	f.Int("ticket.defaultpriority", 0, "ticket priority ID for severities not in ticket.priorities (required)")
-	f.String("ticket.severitylabel", "severity", "common label mapped through ticket.priorities")
+	f.String("ticket.severitylabel", "severity", "label whose value is mapped through ticket.priorities")
+	f.StringSlice("ticket.severityorder", nil, "severities in ticket.priorities, most serious first; when set, an alert group's priority comes from its highest firing severity (optional)")
+	f.String("ticket.appliedpriorityudf", "", "name of the Ticket UDF holding the priority last applied; when set, ticket priority follows severity (optional, requires ticket.severityorder)")
 	f.Int("ticket.status", 1, "status ID of new tickets")
 	f.Int("ticket.type", 5, "ticket type ID of new tickets")
 	f.Int("ticket.source", 8, "source ID of new tickets")
@@ -134,6 +138,7 @@ func FromFlags(f *pflag.FlagSet) (Config, error) {
 		},
 		CompanySelectorsUDF: k.String("company.udf"),
 		RecordedAlertsUDF:   k.String("ticket.udf"),
+		AppliedPriorityUDF:  k.String("ticket.appliedpriorityudf"),
 		Refresh:             k.Duration("company.refresh"),
 		MissRefresh:         k.Duration("company.missrefresh"),
 		Receiver: receiver.Options{
@@ -141,6 +146,8 @@ func FromFlags(f *pflag.FlagSet) (Config, error) {
 			SeverityLabel:     k.String("ticket.severitylabel"),
 			Priorities:        k.IntMap("ticket.priorities"),
 			DefaultPriority:   k.Int("ticket.defaultpriority"),
+			SeverityOrder:     k.Strings("ticket.severityorder"),
+			FollowSeverity:    k.String("ticket.appliedpriorityudf") != "",
 			Status:            k.Int("ticket.status"),
 			TicketType:        k.Int("ticket.type"),
 			Source:            k.Int("ticket.source"),
@@ -179,6 +186,7 @@ func FromFlags(f *pflag.FlagSet) (Config, error) {
 			errs = append(errs, fmt.Errorf("%s is required", r.key))
 		}
 	}
+	errs = append(errs, severityOrderErrors(cfg.Receiver)...)
 	switch cfg.TracingExporter {
 	case "none", "otlp", "console":
 	default:
@@ -192,6 +200,41 @@ func FromFlags(f *pflag.FlagSet) (Config, error) {
 		return Config{}, &invalidError{errs}
 	}
 	return cfg, nil
+}
+
+// severityOrderErrors checks the severity order ranks exactly the severities
+// mapped to priorities, and is set when priority follows severity.
+func severityOrderErrors(r receiver.Options) []error {
+	if len(r.SeverityOrder) == 0 {
+		if r.FollowSeverity {
+			return []error{errors.New("ticket.appliedpriorityudf requires ticket.severityorder")}
+		}
+		return nil
+	}
+
+	var errs []error
+	seen := map[string]bool{}
+	for _, s := range r.SeverityOrder {
+		switch _, mapped := r.Priorities[s]; {
+		case seen[s]:
+			errs = append(errs, fmt.Errorf("ticket.severityorder lists %q more than once", s))
+		case !mapped:
+			errs = append(errs, fmt.Errorf("ticket.severityorder lists %q, which is not in ticket.priorities", s))
+		}
+		seen[s] = true
+	}
+
+	missing := make([]string, 0, len(r.Priorities))
+	for s := range r.Priorities {
+		if !seen[s] {
+			missing = append(missing, s)
+		}
+	}
+	slices.Sort(missing)
+	for _, s := range missing {
+		errs = append(errs, fmt.Errorf("ticket.severityorder must list %q from ticket.priorities", s))
+	}
+	return errs
 }
 
 // AutotaskFromFlags loads only the Autotask API settings from f, which holds

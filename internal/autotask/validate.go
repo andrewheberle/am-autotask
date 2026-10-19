@@ -28,7 +28,7 @@ type fieldInfo struct {
 }
 
 // Validate checks that the configuration matches this Autotask instance: every
-// picklist ID exists and is active, both UDFs exist, and the catch-all
+// picklist ID exists and is active, every UDF exists, and the catch-all
 // company exists and is active. All problems are reported together.
 func (c *Client) Validate(ctx context.Context, checks []PicklistCheck, catchAllCompanyID int64) error {
 	var errs []error
@@ -53,11 +53,15 @@ func (c *Client) Validate(ctx context.Context, checks []PicklistCheck, catchAllC
 		}
 	}
 
-	for entity, name := range map[string]string{
-		"Tickets":   c.opts.RecordedAlertsUDF,
-		"Companies": c.opts.CompanySelectorsUDF,
-	} {
-		if err := c.checkUDF(ctx, entity, name); err != nil {
+	udfs := []struct{ entity, name string }{
+		{"Tickets", c.opts.RecordedAlertsUDF},
+		{"Companies", c.opts.CompanySelectorsUDF},
+	}
+	if c.opts.AppliedPriorityUDF != "" {
+		udfs = append(udfs, struct{ entity, name string }{"Tickets", c.opts.AppliedPriorityUDF})
+	}
+	for _, udf := range udfs {
+		if err := c.checkUDF(ctx, udf.entity, udf.name); err != nil {
 			errs = append(errs, err)
 		}
 	}

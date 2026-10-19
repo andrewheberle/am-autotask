@@ -10,12 +10,26 @@ import (
 
 // recordingObserver records what the receiver reports to an Observer.
 type recordingObserver struct {
-	mu       sync.Mutex
-	catchAll []string
+	mu         sync.Mutex
+	catchAll   []string
+	priorities []string
+	overrides  int
 }
 
 func (o *recordingObserver) AlertsMoved(int)  {}
 func (o *recordingObserver) OrphanCompleted() {}
+
+func (o *recordingObserver) PriorityChanged(direction string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.priorities = append(o.priorities, direction)
+}
+
+func (o *recordingObserver) PriorityOverridden() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.overrides++
+}
 
 func (o *recordingObserver) CatchAll(reason string) {
 	o.mu.Lock()

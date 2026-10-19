@@ -47,7 +47,10 @@ func (f *fakeAutotask) fail(op string) error {
 }
 
 func (f *fakeAutotask) toTicket(t *fakeTicket) receiver.Ticket {
-	return receiver.Ticket{ID: t.ID, Number: t.Number, Status: t.Status, ExternalID: t.ExternalID, RecordedAlerts: t.RecordedAlerts}
+	return receiver.Ticket{
+		ID: t.ID, Number: t.Number, Status: t.Status, ExternalID: t.ExternalID, RecordedAlerts: t.RecordedAlerts,
+		Priority: t.Priority, AppliedPriority: t.AppliedPriority,
+	}
 }
 
 func (f *fakeAutotask) OpenAlertTickets(_ context.Context) ([]receiver.Ticket, error) {
@@ -140,6 +143,12 @@ func (f *fakeAutotask) UpdateTicket(_ context.Context, id int64, u receiver.Tick
 	if u.ExternalID != nil {
 		t.ExternalID = *u.ExternalID
 	}
+	if u.Priority != nil {
+		t.Priority = *u.Priority
+	}
+	if u.AppliedPriority != nil {
+		t.AppliedPriority = *u.AppliedPriority
+	}
 	return nil
 }
 
@@ -159,6 +168,21 @@ func (f *fakeAutotask) closeTicket(id int64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.ticket(id).Status = completeStatus
+}
+
+// setPriority simulates a technician changing a ticket's priority.
+func (f *fakeAutotask) setPriority(id int64, priority int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ticket(id).Priority = priority
+}
+
+// setAppliedPriority simulates a ticket's applied priority UDF, e.g. one
+// opened before priority followed severity.
+func (f *fakeAutotask) setAppliedPriority(id int64, applied string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ticket(id).AppliedPriority = applied
 }
 
 func (f *fakeAutotask) allTickets() []fakeTicket {

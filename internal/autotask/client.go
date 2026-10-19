@@ -36,6 +36,9 @@ type Options struct {
 	CompanySelectorsUDF string
 	// RecordedAlertsUDF names the Ticket UDF holding recorded alerts.
 	RecordedAlertsUDF string
+	// AppliedPriorityUDF names the Ticket UDF holding the priority last
+	// applied, when ticket priority follows severity; empty otherwise.
+	AppliedPriorityUDF string
 
 	// ZoneInformationURL defaults to [DefaultZoneInformationURL].
 	ZoneInformationURL string
@@ -238,17 +241,23 @@ type ticketItem struct {
 	TicketNumber      string    `json:"ticketNumber"`
 	Status            int       `json:"status"`
 	ExternalID        string    `json:"externalID"`
+	Priority          int       `json:"priority"`
 	UserDefinedFields udfValues `json:"userDefinedFields"`
 }
 
 func (c *Client) toTicket(t ticketItem) receiver.Ticket {
-	return receiver.Ticket{
+	ticket := receiver.Ticket{
 		ID:             t.ID,
 		Number:         t.TicketNumber,
 		Status:         t.Status,
 		ExternalID:     t.ExternalID,
 		RecordedAlerts: t.UserDefinedFields.get(c.opts.RecordedAlertsUDF),
+		Priority:       t.Priority,
 	}
+	if c.opts.AppliedPriorityUDF != "" {
+		ticket.AppliedPriority = t.UserDefinedFields.get(c.opts.AppliedPriorityUDF)
+	}
+	return ticket
 }
 
 // OpenAlertTickets implements [receiver.Autotask]. Only the fields needed
@@ -348,6 +357,9 @@ func (c *Client) CreateTicket(ctx context.Context, t receiver.NewTicket) (receiv
 			{Name: c.opts.RecordedAlertsUDF, Value: &t.RecordedAlerts},
 		},
 	}
+	if c.opts.AppliedPriorityUDF != "" && t.AppliedPriority != "" {
+		body.UserDefinedFields = append(body.UserDefinedFields, udfValue{Name: c.opts.AppliedPriorityUDF, Value: &t.AppliedPriority})
+	}
 	if t.DueDateTime != nil {
 		body.DueDateTime = t.DueDateTime.UTC().Format(time.RFC3339)
 	}
@@ -376,8 +388,14 @@ func (c *Client) UpdateTicket(ctx context.Context, id int64, u receiver.TicketUp
 	if u.Status != nil {
 		body.Status = *u.Status
 	}
+	if u.Priority != nil {
+		body.Priority = *u.Priority
+	}
 	if u.RecordedAlerts != nil {
-		body.UserDefinedFields = []udfValue{{Name: c.opts.RecordedAlertsUDF, Value: u.RecordedAlerts}}
+		body.UserDefinedFields = append(body.UserDefinedFields, udfValue{Name: c.opts.RecordedAlertsUDF, Value: u.RecordedAlerts})
+	}
+	if u.AppliedPriority != nil && c.opts.AppliedPriorityUDF != "" {
+		body.UserDefinedFields = append(body.UserDefinedFields, udfValue{Name: c.opts.AppliedPriorityUDF, Value: u.AppliedPriority})
 	}
 
 	if err := c.do(ctx, http.MethodPatch, c.url("/Tickets"), body, nil); err != nil {

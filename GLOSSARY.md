@@ -16,6 +16,10 @@ _Avoid_: Incident, alert batch
 One webhook delivery from Alertmanager describing the current state of an alert group.
 _Avoid_: Webhook call, message, event
 
+**Severity**:
+How serious an alert says it is, given by one of its labels. An alert group's severity is the highest severity among its firing alerts.
+_Avoid_: Level, urgency, priority (for alerts)
+
 **Runbook**:
 The documentation an alert links to, telling whoever handles its ticket how to respond.
 _Avoid_: Playbook, SOP, KB article
@@ -37,6 +41,14 @@ _Avoid_: Default company, fallback org
 **Ticket**:
 The Autotask ticket representing exactly one alert group. A group has at most one open ticket at a time, its **Current Ticket**; once closed, a ticket is never reopened and the group's next firing gets a new one.
 _Avoid_: Case, incident
+
+**Priority**:
+A ticket's Autotask priority. It follows its alert group's severity, rising and falling with it, until a priority override.
+_Avoid_: Severity (for tickets), urgency
+
+**Priority Override**:
+A person changing a ticket's priority. From then on, the ticket's priority is never changed automatically for the rest of the ticket's life.
+_Avoid_: Manual priority, pinned priority, locked priority
 
 **Orphaned Ticket**:
 An open ticket whose alert group no longer receives notifications because its group key changed, recognised when its recorded alerts fire in another alert group.
