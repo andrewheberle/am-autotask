@@ -151,6 +151,33 @@ func TestPreviousTicketIsNilWhenThereIsNone(t *testing.T) {
 	}
 }
 
+func TestCreateTicketSendsCompanyID(t *testing.T) {
+	tests := []struct {
+		name      string
+		companyID int64
+	}{
+		{"company", 100},
+		// company 0 is the Autotask instance's own company
+		{"own company", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFakeServer(t)
+			c := newClient(t, f)
+
+			created, err := c.CreateTicket(ctx, receiver.NewTicket{CompanyID: tt.companyID, Title: "a", ExternalID: "am:abc", Priority: 1, Status: 1})
+			if err != nil {
+				t.Fatalf("CreateTicket: %v", err)
+			}
+
+			stored := f.get("Tickets", int(created.ID))
+			if got, ok := stored["companyID"]; !ok || !equal(got, tt.companyID) {
+				t.Errorf("stored companyID = %v (sent %t), want %d", got, ok, tt.companyID)
+			}
+		})
+	}
+}
+
 func TestUpdateTicketChangesOnlyGivenFields(t *testing.T) {
 	f := newFakeServer(t)
 	c := newClient(t, f)
@@ -162,7 +189,7 @@ func TestUpdateTicketChangesOnlyGivenFields(t *testing.T) {
 	}
 
 	stored := f.get("Tickets", int(created.ID))
-	if udf(stored, recordedUDF) != "aaaa,bbbb" || stored["status"] != 1 || stored["externalID"] != "am:abc" {
+	if udf(stored, recordedUDF) != "aaaa,bbbb" || stored["status"] != 1 || stored["externalID"] != "am:abc" || stored["companyID"] != 1 {
 		t.Errorf("stored ticket = %v", stored)
 	}
 
