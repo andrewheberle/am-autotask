@@ -51,6 +51,15 @@ Mount the token into Alertmanager at that path. With the Prometheus Operator, li
 
 With the Prometheus Operator, add [servicemonitor.yaml](servicemonitor.yaml) to the resources in [kustomization.yaml](kustomization.yaml) to scrape `/metrics`. To use the [example alerting rules](../prometheus/am-autotask.rules.yml), put their `groups` in the `spec` of a `PrometheusRule`. See [Monitoring](../../docs/monitoring.md), including how to route am-autotask's own alerts away from am-autotask.
 
+To load the [example dashboard](../grafana/am-autotask.json) with the Grafana sidecar, as in the `kube-prometheus-stack` chart, create a ConfigMap with the sidecar's label (`grafana_dashboard` by default) in a namespace it watches:
+
+```sh
+kubectl -n monitoring create configmap am-autotask-dashboard --from-file=examples/grafana/am-autotask.json
+kubectl -n monitoring label configmap am-autotask-dashboard grafana_dashboard=1
+```
+
+Kustomize can't generate it from [kustomization.yaml](kustomization.yaml), because the dashboard is outside this directory.
+
 ## Notes
 
 - **One replica, recreated on rollout.** am-autotask runs as a single instance, so the Deployment uses the `Recreate` strategy and never runs two pods at once.
