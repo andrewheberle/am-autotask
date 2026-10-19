@@ -18,6 +18,9 @@ const (
 
 const truncatedMarker = "… (truncated)"
 
+// runbookAnnotation links an alert to its runbook.
+const runbookAnnotation = "runbook_url"
+
 // truncate cuts s to at most max characters, ending with a visible marker
 // when anything was removed.
 func truncate(s string, max int) string {
@@ -77,6 +80,9 @@ func ticketDescription(n Notification, firing []Alert, ambiguous []int64, previo
 	if b.Len() > 0 {
 		b.WriteString("\n")
 	}
+	if rb := runbook(n.CommonAnnotations); rb != "" {
+		fmt.Fprintf(&b, "Runbook: %s\n\n", rb)
+	}
 
 	fmt.Fprintf(&b, "Group labels: %s\n", formatLabels(n.GroupLabels, nil))
 	if link := alertmanagerLink(n); link != "" {
@@ -99,7 +105,7 @@ func ticketDescription(n Notification, firing []Alert, ambiguous []int64, previo
 	}
 
 	fmt.Fprintf(&b, "\nFiring (%d):\n", len(firing))
-	writeAlerts(&b, firing, n.GroupLabels)
+	writeAlerts(&b, n, firing, true)
 
 	return truncate(b.String(), maxTicketDescription)
 }
@@ -116,14 +122,14 @@ func noteDescription(n Notification, fired, resolved []Alert, overflow bool) str
 	}
 	if len(fired) > 0 {
 		fmt.Fprintf(&b, "Firing (%d):\n", len(fired))
-		writeAlerts(&b, fired, n.GroupLabels)
+		writeAlerts(&b, n, fired, true)
 	}
 	if len(resolved) > 0 {
 		if b.Len() > 0 {
 			b.WriteString("\n")
 		}
 		fmt.Fprintf(&b, "Resolved (%d):\n", len(resolved))
-		writeAlerts(&b, resolved, n.GroupLabels)
+		writeAlerts(&b, n, resolved, false)
 	}
 
 	return truncate(b.String(), maxNoteDescription)
@@ -148,7 +154,7 @@ func movedDescription(n Notification, moved []Alert, current Ticket, emptied boo
 		fmt.Fprintf(&b, "No alerts remain on this ticket; further changes are recorded on %s.\n", current.Number)
 	}
 	fmt.Fprintf(&b, "\nMoved (%d):\n", len(moved))
-	writeAlerts(&b, moved, n.GroupLabels)
+	writeAlerts(&b, n, moved, false)
 
 	return truncate(b.String(), maxNoteDescription)
 }
@@ -173,11 +179,23 @@ func alertmanagerLink(n Notification) string {
 	return strings.TrimSuffix(n.ExternalURL, "/") + "/#/alerts?receiver=" + url.QueryEscape(n.Receiver)
 }
 
-func writeAlerts(b *strings.Builder, alerts []Alert, groupLabels map[string]string) {
+// runbook returns the runbook link in annotations, or "" if there is none.
+func runbook(annotations map[string]string) string {
+	return strings.TrimSpace(annotations[runbookAnnotation])
+}
+
+// writeAlerts lists alerts. With runbooks, each alert's runbook is shown
+// unless it is the runbook shared by the whole notification, which the ticket
+// description shows once.
+func writeAlerts(b *strings.Builder, n Notification, alerts []Alert, runbooks bool) {
+	shared := runbook(n.CommonAnnotations)
 	for _, a := range alerts {
-		fmt.Fprintf(b, "- %s %s\n", a.Labels["alertname"], formatLabels(a.Labels, withAlertname(groupLabels)))
+		fmt.Fprintf(b, "- %s %s\n", a.Labels["alertname"], formatLabels(a.Labels, withAlertname(n.GroupLabels)))
 		if s := a.Annotations["summary"]; s != "" {
 			fmt.Fprintf(b, "  %s\n", s)
+		}
+		if rb := runbook(a.Annotations); runbooks && rb != "" && rb != shared {
+			fmt.Fprintf(b, "  Runbook: %s\n", rb)
 		}
 		fmt.Fprintf(b, "  Started: %s\n", a.StartsAt.UTC().Format(time.RFC3339))
 		if a.Status == statusResolved && !a.EndsAt.IsZero() {

@@ -19,6 +19,15 @@ Each Alertmanager alert group gets one Autotask ticket, raised against the compa
 
 See [GLOSSARY.md](GLOSSARY.md) for the terms used here.
 
+## Ticket contents
+
+- **Title.** The alert name followed by the remaining group labels, for example `KubePodCrashLooping {cluster="prod", namespace="payments"}`.
+- **Description.** The `summary` and `description` annotations when every alert shares them, then the group labels, a link to the alerts in Alertmanager (when Alertmanager sends its `externalURL`), and each firing alert with its labels, summary, start time and source link.
+- **Runbooks.** An alert's `runbook_url` annotation is shown so the service desk can follow it. A runbook shared by every alert is shown once, near the top of the description as `Runbook: <url>`; otherwise each alert's runbook is shown under that alert. Notes show the runbooks of newly firing alerts, unless it is the runbook every alert shares, and never for resolved or moved alerts. The value is shown as written, without checking that it is a valid URL.
+- **Notes.** Titled with the number of alerts that fired and resolved, for example `1 firing, 0 resolved`, prefixed with `Alert group resolved:` when the whole group has resolved, and listing each alert.
+
+Text longer than Autotask allows is cut short, ending with `… (truncated)`.
+
 ## Autotask setup
 
 1. **Create an API user** (security level *API User (system)* or equivalent with access to companies, tickets and ticket notes), and note its user name, secret and API tracking identifier (integration code).

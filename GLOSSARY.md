@@ -16,6 +16,10 @@ _Avoid_: Incident, alert batch
 One webhook delivery from Alertmanager describing the current state of an alert group.
 _Avoid_: Webhook call, message, event
 
+**Runbook**:
+The documentation an alert links to, telling whoever handles its ticket how to respond.
+_Avoid_: Playbook, SOP, KB article
+
 ## Autotask side
 
 **Company**:
