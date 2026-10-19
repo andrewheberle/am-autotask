@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/andrewheberle/am-autotask/compare/v0.6.0...v0.7.0) (2026-10-19)
+
+
+### Features
+
+* let ticket priority follow alert group severity ([#27](https://github.com/andrewheberle/am-autotask/issues/27)) ([e3549d4](https://github.com/andrewheberle/am-autotask/commit/e3549d49807ab0ed8cbf1feaa5d3f899ce534613))
+
 ## [0.6.0](https://github.com/andrewheberle/am-autotask/compare/v0.5.0...v0.6.0) (2026-10-19)
 
 
