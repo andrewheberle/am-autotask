@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/andrewheberle/am-autotask/compare/v0.5.0...v0.6.0) (2026-10-19)
+
+
+### Features
+
+* link alert runbooks in ticket descriptions and notes ([#23](https://github.com/andrewheberle/am-autotask/issues/23)) ([2bd6b70](https://github.com/andrewheberle/am-autotask/commit/2bd6b70b4a4c2566f85b7439f64f58e0ab02d7b1))
+
+
+### Bug Fixes
+
+* send company ID 0 when creating tickets ([#25](https://github.com/andrewheberle/am-autotask/issues/25)) ([0ed0e4e](https://github.com/andrewheberle/am-autotask/commit/0ed0e4e203298eca201fa9020544da72bcce986e))
+
 ## [0.5.0](https://github.com/andrewheberle/am-autotask/compare/v0.4.0...v0.5.0) (2026-10-18)
 
 
