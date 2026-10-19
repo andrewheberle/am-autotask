@@ -905,6 +905,57 @@
               "refId": "B"
             }
           ]
+        },
+        {
+          "id": 18,
+          "type": "timeseries",
+          "title": "Template errors",
+          "description": "Ticket templates from the templates file that failed, so the built-in wording was used instead, per hour by template. Always zero without a templates file.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 44
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0,
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "showPoints": "never",
+                "lineWidth": 1
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (template) (increase(am_autotask_template_errors_total{job=\"$job\", instance=~\"$instance\"}[1h]))",
+              "legendFormat": "{{template}}",
+              "refId": "A"
+            }
+          ]
         }
       ]
     }

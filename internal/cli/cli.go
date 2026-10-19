@@ -63,7 +63,7 @@ func execute(ctx context.Context, args []string, version string) error {
 	root := &rootCommand{
 		Command: simplecommand.New("am-autotask", "Alertmanager webhook receiver that raises Autotask tickets",
 			simplecommand.WithVersion(version),
-			simplecommand.WithSubCommands(newServeCommand(version), newLookupCommand()),
+			simplecommand.WithSubCommands(newServeCommand(version), newLookupCommand(), newTemplatesCommand()),
 		),
 	}
 

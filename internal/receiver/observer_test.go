@@ -14,6 +14,7 @@ type recordingObserver struct {
 	catchAll   []string
 	priorities []string
 	overrides  int
+	templates  []string
 }
 
 func (o *recordingObserver) AlertsMoved(int)  {}
@@ -29,6 +30,12 @@ func (o *recordingObserver) PriorityOverridden() {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.overrides++
+}
+
+func (o *recordingObserver) TemplateFailed(name string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.templates = append(o.templates, name)
 }
 
 func (o *recordingObserver) CatchAll(reason string) {

@@ -18,4 +18,3 @@ Firing (2):
   summary of bbbb
   Started: 2026-10-17T03:50:00Z
   Source: http://prometheus/graph?g0.expr=bbbb
-

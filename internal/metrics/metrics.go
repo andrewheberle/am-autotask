@@ -29,6 +29,7 @@ type Metrics struct {
 	catchAll       *prometheus.CounterVec
 	priorities     *prometheus.CounterVec
 	overrides      prometheus.Counter
+	templates      *prometheus.CounterVec
 	duration       *prometheus.HistogramVec
 }
 
@@ -85,6 +86,10 @@ func New(opts Options) *Metrics {
 			Namespace: namespace, Name: "ticket_priority_overrides_total",
 			Help: "Tickets found with a manually changed priority, which then no longer follows severity.",
 		}),
+		templates: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace, Name: "template_errors_total",
+			Help: "Ticket templates from the templates file that failed, so the built-in template was used instead, by template.",
+		}, []string{"template"}),
 		duration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: namespace, Name: "autotask_request_duration_seconds",
 			Help:    "Duration of Autotask API operations made while handling notifications, including paging, by operation.",
@@ -99,6 +104,9 @@ func New(opts Options) *Metrics {
 	for _, direction := range []string{receiver.PriorityRaised, receiver.PriorityLowered} {
 		m.priorities.WithLabelValues(direction)
 	}
+	for _, name := range receiver.TemplateNames {
+		m.templates.WithLabelValues(name)
+	}
 
 	selectorCount := func(state string, pick func(valid, invalid int) int) prometheus.Collector {
 		return prometheus.NewGaugeFunc(prometheus.GaugeOpts{
@@ -110,7 +118,7 @@ func New(opts Options) *Metrics {
 
 	m.registry.MustRegister(
 		m.notifications, m.ticketsCreated, m.notesCreated, m.autotaskErrors, m.alertsMoved, m.orphansDone,
-		m.catchAll, m.priorities, m.overrides, m.duration,
+		m.catchAll, m.priorities, m.overrides, m.templates, m.duration,
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: namespace, Name: "company_selectors_age_seconds",
 			Help: "Seconds since company selectors were last loaded from Autotask.",
@@ -161,6 +169,11 @@ func (m *Metrics) PriorityChanged(direction string) {
 // PriorityOverridden implements [receiver.Observer].
 func (m *Metrics) PriorityOverridden() {
 	m.overrides.Inc()
+}
+
+// TemplateFailed implements [receiver.Observer].
+func (m *Metrics) TemplateFailed(template string) {
+	m.templates.WithLabelValues(template).Inc()
 }
 
 // ObserveNotification counts a webhook request by result.

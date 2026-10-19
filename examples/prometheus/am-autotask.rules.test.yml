@@ -421,3 +421,26 @@ tests:
               summary: Some company selectors cannot be parsed
               description: 1 company has company selectors am-autotask:8080 cannot parse, so no alert groups are matched to them.
               runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskinvalidcompanyselectors
+
+  - name: template errors
+    interval: 1m
+    input_series:
+      - series: 'am_autotask_template_errors_total{job="am-autotask", instance="am-autotask:8080", template="ticket.title"}'
+        values: '0x10 1x50'
+      - series: 'am_autotask_template_errors_total{job="am-autotask", instance="am-autotask:8080", template="note.title"}'
+        values: '0x60'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: AmAutotaskTemplateErrors
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: AmAutotaskTemplateErrors
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: am-autotask:8080
+              template: ticket.title
+            exp_annotations:
+              summary: Ticket templates are failing
+              description: The ticket.title template on am-autotask:8080 failed in the last hour, so the built-in wording was used instead.
+              runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotasktemplateerrors
