@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/andrewheberle/am-autotask/internal/receiver"
 )
@@ -19,6 +20,9 @@ func TestBuiltInWordingMatchesGoldenFiles(t *testing.T) {
 	tests := []struct {
 		name  string
 		steps []receiver.Notification
+		// previous, when set, adds tickets before the steps, with a lookback
+		// period configured
+		previous func(at *fakeAutotask)
 	}{
 		{
 			name:  "single alert",
@@ -70,11 +74,30 @@ func TestBuiltInWordingMatchesGoldenFiles(t *testing.T) {
 				return n
 			}()},
 		},
+		{
+			name:  "recurrence raises problem ticket",
+			steps: []receiver.Notification{notification(hostAlert("aaaa", "firing", "web1"))},
+			previous: func(at *fakeAutotask) {
+				addPrevious(at, receiver.TicketTypeIncident, 0, time.Hour)
+			},
+		},
+		{
+			name:  "recurrence follows problem ticket",
+			steps: []receiver.Notification{notification(hostAlert("aaaa", "firing", "web1"))},
+			previous: func(at *fakeAutotask) {
+				addPrevious(at, receiver.TicketTypeIncident, addProblem(at, false), time.Hour)
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			at := newFakeAutotask()
-			r := newReceiver(t, at, testOptions())
+			opts := testOptions()
+			if tt.previous != nil {
+				opts = recurrenceOptions(nil)
+				tt.previous(at)
+			}
+			r := newReceiver(t, at, opts)
 			for _, n := range tt.steps {
 				handle(t, r, n)
 			}

@@ -96,6 +96,16 @@ func (t *tracedAutotask) PreviousTicket(ctx context.Context, id string) (*receiv
 	return tk, err
 }
 
+func (t *tracedAutotask) Ticket(ctx context.Context, id int64) (*receiver.Ticket, error) {
+	ctx, span := t.start(ctx, "get_ticket", attribute.Int64("am_autotask.ticket.id", id))
+	tk, err := t.at.Ticket(ctx, id)
+	if tk != nil {
+		span.SetAttributes(attribute.String("am_autotask.ticket.number", tk.Number))
+	}
+	receiver.EndSpan(span, err)
+	return tk, err
+}
+
 func (t *tracedAutotask) OpenAlertTickets(ctx context.Context) ([]receiver.Ticket, error) {
 	ctx, span := t.start(ctx, "open_alert_tickets")
 	tickets, err := t.at.OpenAlertTickets(ctx)
@@ -125,6 +135,9 @@ func (t *tracedAutotask) UpdateTicket(ctx context.Context, id int64, u receiver.
 	attrs := []attribute.KeyValue{attribute.Int64("am_autotask.ticket.id", id)}
 	if u.Status != nil {
 		attrs = append(attrs, attribute.Int("am_autotask.ticket.status", *u.Status))
+	}
+	if u.ProblemTicketID != nil {
+		attrs = append(attrs, attribute.Int64("am_autotask.ticket.problem_id", *u.ProblemTicketID))
 	}
 	ctx, span := t.start(ctx, "update_ticket", attrs...)
 	err := t.at.UpdateTicket(ctx, id, u)

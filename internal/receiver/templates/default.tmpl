@@ -74,3 +74,13 @@ Firing ({{len .Alerts}}):
 {{end -}}
 {{end -}}
 {{end}}
+
+{{define "problem.title" -}}
+Repeated alert: {{.TicketTitle}}
+{{- end}}
+
+{{define "problem.description" -}}
+This alert group fired again soon after its previous ticket, {{.PreviousTicketNumber}}, was completed, raising {{.TicketNumber}}. Use this problem ticket to find and fix the underlying cause.
+
+{{template "ticket.description" .}}
+{{- end}}

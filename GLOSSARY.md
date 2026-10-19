@@ -42,6 +42,18 @@ _Avoid_: Default company, fallback org
 The Autotask ticket representing exactly one alert group. A group has at most one open ticket at a time, its **Current Ticket**; once closed, a ticket is never reopened and the group's next firing gets a new one.
 _Avoid_: Case, incident
 
+**Recurrence**:
+An alert group getting a new ticket while its previous ticket was completed within the lookback period. Only the group's most recent completed ticket is considered.
+_Avoid_: Repeat, reopen, recurring ticket (an Autotask feature for scheduled tickets)
+
+**Lookback Period**:
+How recently an alert group's previous ticket must have been completed for its new ticket to be a recurrence, counted from when that ticket was completed.
+_Avoid_: Window, grace period
+
+**Problem Ticket**:
+An Autotask ticket of type Problem that links the tickets of an alert group's recurrences. Raised once by am-autotask, then left to people. A recurrence follows the previous ticket's problem ticket unless that one is completed, in which case a new one is raised.
+_Avoid_: Parent ticket, master ticket
+
 **Priority**:
 A ticket's Autotask priority. It follows its alert group's severity, rising and falling with it, until a priority override.
 _Avoid_: Severity (for tickets), urgency

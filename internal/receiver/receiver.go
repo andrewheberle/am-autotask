@@ -65,7 +65,19 @@ type Ticket struct {
 	// after a priority override, or empty when the ticket's priority is not
 	// managed.
 	AppliedPriority string
+	// Type is the ticket type ID, such as [TicketTypeIncident].
+	Type int
+	// ProblemTicketID is the problem ticket this ticket is linked to, or 0.
+	ProblemTicketID int64
+	// CompletedAt is when the ticket was completed, or zero if it is not.
+	CompletedAt time.Time
 }
+
+// Autotask's system ticket type IDs.
+const (
+	TicketTypeIncident = 2
+	TicketTypeProblem  = 3
+)
 
 // NewTicket is a ticket to create. Zero-valued optional IDs are omitted.
 type NewTicket struct {
@@ -86,6 +98,8 @@ type NewTicket struct {
 	RecordedAlerts string
 	// AppliedPriority is empty unless the priority follows severity.
 	AppliedPriority string
+	// ProblemTicketID links the ticket to a problem ticket when not 0.
+	ProblemTicketID int64
 }
 
 // NewNote is a ticket note to create.
@@ -104,6 +118,7 @@ type TicketUpdate struct {
 	ExternalID      *string
 	Priority        *int
 	AppliedPriority *string
+	ProblemTicketID *int64
 }
 
 // Autotask is the subset of the Autotask API the receiver needs.
@@ -114,6 +129,8 @@ type Autotask interface {
 	// PreviousTicket returns the most recent complete ticket with this
 	// external ID, or nil if there is none.
 	PreviousTicket(ctx context.Context, externalID string) (*Ticket, error)
+	// Ticket returns the ticket with this ID, or nil if there is none.
+	Ticket(ctx context.Context, id int64) (*Ticket, error)
 	// OpenAlertTickets returns every ticket that is not complete and whose
 	// external ID begins with "am:", across all alert groups.
 	OpenAlertTickets(ctx context.Context) ([]Ticket, error)
@@ -162,6 +179,19 @@ type Options struct {
 	Category     int
 	WorkType     int
 	DueIn        time.Duration
+
+	// Lookback is the lookback period: a new ticket raised within it of
+	// the alert group's previous ticket being completed is a recurrence,
+	// linked to a problem ticket. Zero disables recurrences; otherwise
+	// TicketType must be [TicketTypeIncident].
+	Lookback time.Duration
+	// ProblemCompanyID, when set, is the company problem tickets are
+	// raised against instead of the new ticket's company. It may point
+	// to 0.
+	ProblemCompanyID *int64
+	// ProblemQueueID, when not 0, is the queue of problem tickets instead
+	// of the new ticket's queue.
+	ProblemQueueID int
 
 	// ResolvedStatus is applied when the whole alert group resolves; zero
 	// leaves the ticket status unchanged.
@@ -217,6 +247,9 @@ type Observer interface {
 	// TemplateFailed is called with a ticket template's name when the
 	// templates file's definition fails and the built-in one is used instead.
 	TemplateFailed(template string)
+	// Recurrence is called for each recurrence with its outcome:
+	// [RecurrenceFollowed], [RecurrenceRaised] or [RecurrenceFailed].
+	Recurrence(outcome string)
 }
 
 type noopObserver struct{}
@@ -227,6 +260,7 @@ func (noopObserver) OrphanCompleted()       {}
 func (noopObserver) PriorityChanged(string) {}
 func (noopObserver) PriorityOverridden()    {}
 func (noopObserver) TemplateFailed(string)  {}
+func (noopObserver) Recurrence(string)      {}
 
 // Receiver applies notifications to Autotask.
 type Receiver struct {
@@ -244,6 +278,12 @@ func New(at Autotask, matcher CompanyMatcher, locker Locker, opts Options) (*Rec
 	}
 	if opts.FollowSeverity && len(opts.SeverityOrder) == 0 {
 		return nil, errors.New("following severity requires a severity order")
+	}
+	if opts.Lookback < 0 {
+		return nil, errors.New("lookback period must not be negative")
+	}
+	if opts.Lookback > 0 && opts.TicketType != TicketTypeIncident {
+		return nil, errors.New("recurrences require the Incident ticket type")
 	}
 	if opts.SeverityLabel == "" {
 		opts.SeverityLabel = "severity"
@@ -479,11 +519,12 @@ func (r *Receiver) create(ctx context.Context, n Notification, externalID string
 	severity, priority := r.severity(n, firing)
 	data := TicketData{Group: group(n, severity), Alerts: alertData(firing)}
 	notices := ticketNotices(ambiguous, previous, orphanTickets(orphans), overflow)
+	description := r.render(ctx, TemplateTicketDescription, data)
 
 	t := NewTicket{
 		CompanyID:      companyID,
 		Title:          truncate(r.render(ctx, TemplateTicketTitle, data), maxTicketTitle),
-		Description:    truncate(withNotices(notices, r.render(ctx, TemplateTicketDescription, data)), maxTicketDescription),
+		Description:    truncate(withNotices(notices, description), maxTicketDescription),
 		ExternalID:     externalID,
 		Priority:       priority,
 		Status:         r.opts.Status,
@@ -504,13 +545,31 @@ func (r *Receiver) create(ctx context.Context, n Notification, externalID string
 		t.DueDateTime = &due
 	}
 
-	created, err := r.at.CreateTicket(ctx, t)
+	rec := r.recurrence(ctx, previous)
+	var created Ticket
+	if rec.follows() {
+		linked := t
+		linked.ProblemTicketID = rec.problem.ID
+		linked.Description = truncate(withNotices(append(notices, linkedNotice(*rec.problem)), description), maxTicketDescription)
+		created, err = r.at.CreateTicket(ctx, linked)
+		if errors.Is(err, ErrPermanent) {
+			// Autotask rejected the link, perhaps because the problem ticket
+			// holds as many incidents as it allows; the ticket matters more
+			rec.err = fmt.Errorf("linking to problem ticket %s: %w", rec.problem.Number, err)
+			created, err = r.at.CreateTicket(ctx, t)
+		}
+	} else {
+		created, err = r.at.CreateTicket(ctx, t)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("creating ticket: %w", err)
 	}
 
 	if catchAll != "" {
 		r.opts.Observer.CatchAll(catchAll)
+	}
+	if rec != nil {
+		r.linkRecurrence(ctx, rec, data, t, created)
 	}
 
 	return &created, nil

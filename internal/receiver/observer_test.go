@@ -14,7 +14,14 @@ type recordingObserver struct {
 	catchAll   []string
 	priorities []string
 	overrides  int
-	templates  []string
+	templates   []string
+	recurrences []string
+}
+
+func (o *recordingObserver) Recurrence(outcome string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.recurrences = append(o.recurrences, outcome)
 }
 
 func (o *recordingObserver) AlertsMoved(int)  {}

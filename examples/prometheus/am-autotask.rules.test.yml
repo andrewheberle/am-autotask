@@ -444,3 +444,25 @@ tests:
               summary: Ticket templates are failing
               description: The ticket.title template on am-autotask:8080 failed in the last hour, so the built-in wording was used instead.
               runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotasktemplateerrors
+
+  - name: recurrence link failed
+    interval: 1m
+    input_series:
+      - series: 'am_autotask_recurrences_total{job="am-autotask", instance="am-autotask:8080", outcome="failed"}'
+        values: '0x10 1x50'
+      - series: 'am_autotask_recurrences_total{job="am-autotask", instance="am-autotask:8080", outcome="raised"}'
+        values: '0x5 1x55'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: AmAutotaskRecurrenceLinkFailed
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: AmAutotaskRecurrenceLinkFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: am-autotask:8080
+            exp_annotations:
+              summary: Recurring tickets were not linked to a problem ticket
+              description: Tickets raised on am-autotask:8080 in the last hour soon after their alert group's previous ticket was completed could not be linked to a problem ticket, and need linking by hand.
+              runbook_url: https://github.com/andrewheberle/am-autotask/blob/main/docs/monitoring.md#amautotaskrecurrencelinkfailed

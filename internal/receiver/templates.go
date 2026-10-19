@@ -17,14 +17,19 @@ import (
 
 // Names of the ticket templates, each a block a templates file may define.
 const (
-	TemplateTicketTitle       = "ticket.title"
-	TemplateTicketDescription = "ticket.description"
-	TemplateNoteTitle         = "note.title"
-	TemplateNoteDescription   = "note.description"
+	TemplateTicketTitle        = "ticket.title"
+	TemplateTicketDescription  = "ticket.description"
+	TemplateNoteTitle          = "note.title"
+	TemplateNoteDescription    = "note.description"
+	TemplateProblemTitle       = "problem.title"
+	TemplateProblemDescription = "problem.description"
 )
 
 // TemplateNames lists every ticket template, in the order they are shown.
-var TemplateNames = []string{TemplateTicketTitle, TemplateTicketDescription, TemplateNoteTitle, TemplateNoteDescription}
+var TemplateNames = []string{
+	TemplateTicketTitle, TemplateTicketDescription, TemplateNoteTitle, TemplateNoteDescription,
+	TemplateProblemTitle, TemplateProblemDescription,
+}
 
 // defaultTimeLayout is the layout of the time template function when none is
 // given.
@@ -66,6 +71,17 @@ type NoteData struct {
 	// GroupResolved is set when the whole alert group has resolved.
 	GroupResolved bool
 	TicketNumber  string
+}
+
+// ProblemData is the data the problem ticket title and description
+// templates are executed with: the new ticket's data, plus the tickets the
+// problem ticket links.
+type ProblemData struct {
+	TicketData
+	// TicketTitle is the new ticket's title.
+	TicketTitle          string
+	TicketNumber         string
+	PreviousTicketNumber string
 }
 
 // AlertData is an alert as ticket templates see it.
@@ -136,14 +152,10 @@ func ParseTemplates(path string, loc *time.Location) (*Templates, error) {
 	if err != nil {
 		return nil, err
 	}
-	ticket, note := previewData(n)
+	data := previewData(n, custom)
 	var errs []error
 	for _, name := range TemplateNames {
-		data := any(ticket)
-		if strings.HasPrefix(name, "note.") {
-			data = note
-		}
-		if _, err := execute(custom, name, data); err != nil {
+		if _, err := execute(custom, name, data.forTemplate(name)); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -191,9 +203,9 @@ func formatTime(t time.Time, loc *time.Location) string {
 func templateFuncs(loc *time.Location) template.FuncMap {
 	return template.FuncMap{
 		"labels": templateLabels,
-		"upper": strings.ToUpper,
-		"lower": strings.ToLower,
-		"trim":  strings.TrimSpace,
+		"upper":  strings.ToUpper,
+		"lower":  strings.ToLower,
+		"trim":   strings.TrimSpace,
 		"time": func(t time.Time, layout ...string) (string, error) {
 			switch len(layout) {
 			case 0:
@@ -282,18 +294,49 @@ func SampleNotification() (Notification, error) {
 	return n, nil
 }
 
+// templateData holds the data for each kind of ticket template.
+type templateData struct {
+	ticket  TicketData
+	note    NoteData
+	problem ProblemData
+}
+
+// forTemplate returns the data the named template is executed with.
+func (d templateData) forTemplate(name string) any {
+	switch {
+	case strings.HasPrefix(name, "note."):
+		return d.note
+	case strings.HasPrefix(name, "problem."):
+		return d.problem
+	}
+	return d.ticket
+}
+
 // previewData is the data templates are executed with to preview a
-// notification: as if it raised a ticket from its firing alerts, and as if
-// its firing and resolved alerts were all changes for a change note.
-func previewData(n Notification) (TicketData, NoteData) {
+// notification: as if it raised a ticket from its firing alerts, as if its
+// firing and resolved alerts were all changes for a change note, and as if
+// its ticket, titled by tmpl, were a recurrence raising a problem ticket.
+func previewData(n Notification, tmpl *template.Template) templateData {
 	firing := alertData(alertsWithStatus(n.Alerts, statusFiring))
 	g := group(n, n.CommonLabels["severity"])
-	return TicketData{Group: g, Alerts: firing}, NoteData{
-		Group:         g,
-		Fired:         firing,
-		Resolved:      alertData(alertsWithStatus(n.Alerts, statusResolved)),
-		GroupResolved: n.Status == statusResolved,
-		TicketNumber:  "T20261019.0001",
+	ticket := TicketData{Group: g, Alerts: firing}
+	// a failing title is reported when the title template itself is run
+	title, _ := execute(tmpl, TemplateTicketTitle, ticket)
+	return templateData{
+		ticket: ticket,
+		note: NoteData{
+			Group:         g,
+			Fired:         firing,
+			Resolved:      alertData(alertsWithStatus(n.Alerts, statusResolved)),
+			GroupResolved: n.Status == statusResolved,
+			TicketNumber:  "T20261019.0001",
+		},
+		problem: ProblemData{
+			TicketData:           ticket,
+			TicketTitle:          tidy(TemplateTicketTitle, title),
+			TicketNumber:         "T20261019.0002",
+			PreviousTicketNumber: "T20261019.0001",
+		},
 	}
 }
 
@@ -305,14 +348,10 @@ func (t *Templates) Preview(n Notification) (map[string]string, error) {
 	if t.custom != nil {
 		tmpl = t.custom
 	}
-	ticket, note := previewData(n)
+	data := previewData(n, tmpl)
 	out := map[string]string{}
 	for _, name := range TemplateNames {
-		data := any(ticket)
-		if strings.HasPrefix(name, "note.") {
-			data = note
-		}
-		s, err := execute(tmpl, name, data)
+		s, err := execute(tmpl, name, data.forTemplate(name))
 		if err != nil {
 			return nil, err
 		}

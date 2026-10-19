@@ -102,6 +102,9 @@ func (f fakeAutotask) OpenTickets(context.Context, string) ([]receiver.Ticket, e
 func (f fakeAutotask) PreviousTicket(context.Context, string) (*receiver.Ticket, error) {
 	return nil, f.err
 }
+func (f fakeAutotask) Ticket(context.Context, int64) (*receiver.Ticket, error) {
+	return nil, f.err
+}
 func (f fakeAutotask) OpenAlertTickets(context.Context) ([]receiver.Ticket, error) { return nil, f.err }
 func (f fakeAutotask) CreateTicket(context.Context, receiver.NewTicket) (receiver.Ticket, error) {
 	return receiver.Ticket{ID: 77, Number: "T20261017.0077"}, f.err

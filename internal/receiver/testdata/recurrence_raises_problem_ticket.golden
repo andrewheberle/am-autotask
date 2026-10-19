@@ -1,0 +1,40 @@
+=== ticket title
+Host is down
+=== ticket description
+
+=== ticket title
+Host is down {tenant_id="foo"}
+=== ticket description
+Previous ticket for this alert group: T20261017.0001
+
+Host is down
+
+Group labels: {alertname="HostDown", tenant_id="foo"}
+Alertmanager: http://alertmanager:9093/#/alerts?receiver=autotask
+
+Firing (1):
+- HostDown {instance="web1", severity="critical"}
+  summary of aaaa
+  Started: 2026-10-17 03:50:00 UTC
+  Source: http://prometheus/graph?g0.expr=aaaa
+=== note title
+Linked to problem ticket T20261017.0003
+=== note description
+Linked to problem ticket T20261017.0003: this alert group fired again soon after its previous ticket was completed.
+=== ticket title
+Repeated alert: Host is down {tenant_id="foo"}
+=== ticket description
+Linked tickets: T20261017.0001, T20261017.0002
+
+This alert group fired again soon after its previous ticket, T20261017.0001, was completed, raising T20261017.0002. Use this problem ticket to find and fix the underlying cause.
+
+Host is down
+
+Group labels: {alertname="HostDown", tenant_id="foo"}
+Alertmanager: http://alertmanager:9093/#/alerts?receiver=autotask
+
+Firing (1):
+- HostDown {instance="web1", severity="critical"}
+  summary of aaaa
+  Started: 2026-10-17 03:50:00 UTC
+  Source: http://prometheus/graph?g0.expr=aaaa
