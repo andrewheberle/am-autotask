@@ -31,7 +31,7 @@ Text longer than Autotask allows is cut short, ending with `… (truncated)`.
 
 ## Autotask setup
 
-1. **Create an API user** (security level *API User (system)* or equivalent with access to companies, tickets and ticket notes), and note its user name, secret and API tracking identifier (integration code).
+1. **Create an API user**, and note its user name, secret and API tracking identifier (integration code). Give it security level *API User (system)*, or an equivalent with access to companies, tickets and ticket notes. If you set `ticket.worktype` or run `am-autotask lookup worktypes`, it also needs read access to billing codes, as Autotask holds work types as billing codes.
 2. **Create a Company UDF**, by default named `Alertmanager Selectors`. Use a text field (multi-line, if you want several selectors). This holds each company's company selectors.
 3. **Create a Ticket UDF**, by default named `Alertmanager Recorded Alerts`. Use a text field. The receiver manages its contents; it should not be edited by hand.
 4. **Choose the catch-all company**, for example your own company, and note its ID. Your own company always has ID `0`. `am-autotask lookup companies` finds it (see [Finding IDs](#finding-ids)).
