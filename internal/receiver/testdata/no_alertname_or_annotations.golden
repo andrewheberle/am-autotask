@@ -1,0 +1,11 @@
+=== ticket title
+Alert group {tenant_id="foo"}
+=== ticket description
+Group labels: {tenant_id="foo"}
+
+Firing (1):
+-  {job="node"}
+  summary of aaaa
+  Started: 2026-10-17T03:50:00Z
+  Source: http://prometheus/graph?g0.expr=aaaa
+

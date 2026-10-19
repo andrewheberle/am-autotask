@@ -1,0 +1,16 @@
+=== ticket title
+HostDown {tenant_id="both"}
+=== ticket description
+Host is down
+
+Group labels: {alertname="HostDown", tenant_id="both"}
+Alertmanager: http://alertmanager:9093/#/alerts?receiver=autotask
+
+NOTE: this alert group matched the company selectors of more than one company (IDs 100, 200) so it was raised against the catch-all company. Correct the company selectors so only one company matches.
+
+Firing (1):
+- HostDown {instance="web1", severity="critical"}
+  summary of aaaa
+  Started: 2026-10-17T03:50:00Z
+  Source: http://prometheus/graph?g0.expr=aaaa
+

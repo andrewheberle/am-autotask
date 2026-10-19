@@ -1,0 +1,43 @@
+=== ticket title
+HostDown {tenant_id="foo"}
+=== ticket description
+Host is down
+
+Group labels: {alertname="HostDown", tenant_id="foo"}
+Alertmanager: http://alertmanager:9093/#/alerts?receiver=autotask
+
+Firing (1):
+- HostDown {instance="web1", severity="critical"}
+  summary of aaaa
+  Started: 2026-10-17T03:50:00Z
+  Source: http://prometheus/graph?g0.expr=aaaa
+
+=== note title
+1 firing, 0 resolved
+=== note description
+Firing (1):
+- HostDown {instance="web2", severity="critical"}
+  summary of bbbb
+  Started: 2026-10-17T03:50:00Z
+  Source: http://prometheus/graph?g0.expr=bbbb
+
+=== note title
+0 firing, 1 resolved
+=== note description
+Resolved (1):
+- HostDown {instance="web2", severity="critical"}
+  summary of bbbb
+  Started: 2026-10-17T03:50:00Z
+  Ended: 2026-10-17T04:00:00Z
+  Source: http://prometheus/graph?g0.expr=bbbb
+
+=== note title
+Alert group resolved: 0 firing, 1 resolved
+=== note description
+Resolved (1):
+- HostDown {instance="web1", severity="critical"}
+  summary of aaaa
+  Started: 2026-10-17T03:50:00Z
+  Ended: 2026-10-17T04:00:00Z
+  Source: http://prometheus/graph?g0.expr=aaaa
+
