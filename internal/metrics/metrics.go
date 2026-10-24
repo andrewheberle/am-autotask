@@ -32,6 +32,7 @@ type Metrics struct {
 	overrides      prometheus.Counter
 	templates      *prometheus.CounterVec
 	recurrences    *prometheus.CounterVec
+	reopened       prometheus.Counter
 	duration       *prometheus.HistogramVec
 	transitions    prometheus.Counter
 	forwarded      *prometheus.CounterVec
@@ -104,6 +105,10 @@ func New(opts Options) *Metrics {
 			Namespace: namespace, Name: "recurrences_total",
 			Help: "New tickets raised within the lookback period of their alert group's previous ticket being completed, by outcome (followed an open problem ticket, raised a problem ticket, failed to link).",
 		}, []string{"outcome"}),
+		reopened: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: namespace, Name: "tickets_reopened_total",
+			Help: "Tickets awaiting closure reopened because their alert group fired again.",
+		}),
 		duration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: namespace, Name: "autotask_request_duration_seconds",
 			Help:    "Duration of Autotask API operations made while handling notifications, including paging, by operation.",
@@ -146,7 +151,7 @@ func New(opts Options) *Metrics {
 
 	m.registry.MustRegister(
 		m.notifications, m.ticketsCreated, m.notesCreated, m.autotaskErrors, m.alertsMoved, m.orphansDone,
-		m.catchAll, m.priorities, m.overrides, m.templates, m.recurrences, m.duration, m.transitions, m.forwarded,
+		m.catchAll, m.priorities, m.overrides, m.templates, m.recurrences, m.reopened, m.duration, m.transitions, m.forwarded,
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: namespace, Name: "company_selectors_age_seconds",
 			Help: "Seconds since company selectors were last loaded from Autotask.",
@@ -216,6 +221,11 @@ func (m *Metrics) TemplateFailed(template string) {
 // Recurrence implements [receiver.Observer].
 func (m *Metrics) Recurrence(outcome string) {
 	m.recurrences.WithLabelValues(outcome).Inc()
+}
+
+// Reopened implements [receiver.Observer].
+func (m *Metrics) Reopened() {
+	m.reopened.Inc()
 }
 
 // LeaderChanged counts this replica becoming or stopping being the leader.

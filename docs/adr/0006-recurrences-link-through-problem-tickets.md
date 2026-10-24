@@ -4,7 +4,7 @@ A completed ticket is never reopened, so an alert group that fires again soon af
 
 ## Considered Options
 
-- **Reopen the previous ticket within the lookback period**: no extra ticket, but contradicts the rule that a completed ticket is never reopened, loses the record that the first occurrence was resolved, and reopens work that may already be billed.
+- **Reopen the previous ticket within the lookback period**: no extra ticket, but contradicts the rule that a completed ticket is never reopened, loses the record that the first occurrence was resolved, and reopens work that may already be billed. A ticket not yet completed, awaiting closure, is reopened instead (ADR-0008).
 - **Only a system notice naming the previous ticket** (the behaviour without a lookback period): no extra writes, but nothing groups repeated tickets for someone looking for an underlying cause.
 - **Manage the problem ticket like an alert group ticket** (notes, priority following severity, resolving with the group): keeps it current, but duplicates every change note and fights the people working the problem, whose status and priority decisions should stand.
 - **Change ticket types as needed** (Alert to Incident) when linking: works with the default ticket type, but changes completed tickets a person may have classified deliberately.

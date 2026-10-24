@@ -810,7 +810,7 @@
           "id": 13,
           "type": "timeseries",
           "title": "Tickets and notes created",
-          "description": "Autotask tickets and ticket notes created per hour.",
+          "description": "Autotask tickets and ticket notes created, and tickets awaiting closure reopened, per hour.",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -863,6 +863,15 @@
               "expr": "sum(increase(am_autotask_notes_created_total{job=\"$job\", instance=~\"$instance\"}[1h]))",
               "legendFormat": "notes",
               "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(increase(am_autotask_tickets_reopened_total{job=\"$job\", instance=~\"$instance\"}[1h]))",
+              "legendFormat": "reopened tickets",
+              "refId": "C"
             }
           ]
         },

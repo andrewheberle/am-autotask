@@ -72,7 +72,7 @@ func (c *lookupCommand) Run(ctx context.Context, cd *simplecobra.Commandeer, arg
 type lookupSubcommand struct {
 	all      bool
 	allUsage string
-	run func(ctx context.Context, w io.Writer, at lookup.Autotask, all bool, args []string) error
+	run      func(ctx context.Context, w io.Writer, at lookup.Autotask, all bool, args []string) error
 
 	*simplecommand.Command
 }

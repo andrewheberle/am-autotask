@@ -13,7 +13,8 @@ Each Alertmanager alert group gets one Autotask ticket, raised against the compa
 - **Choosing the company.** Each company in Autotask can hold one or more *company selectors* in a Company UDF. They are matched against the notification's `groupLabels`. A group matched by no company, or by more than one, is raised against the configured *catch-all company*; an ambiguous match is explained in the ticket description (see [ADR-0002](docs/adr/0002-company-selectors-live-in-autotask.md)).
 - **Notes only on change.** A note is added when an alert fires that the ticket hasn't recorded yet, or a recorded alert resolves. Re-sends with nothing new (for example on `repeat_interval`) add nothing. The fingerprints of recorded alerts are kept in a Ticket UDF.
 - **Resolution.** When every alert in the group has resolved, a final note is added and the ticket is set to `ticket.resolvedstatus` (default 5, *Complete*).
-- **Closed tickets are never reopened.** If a group fires again after its ticket was completed, including when a technician completed it while alerts were still firing, a new ticket is created that references the previous one. With a lookback period, a new ticket raised soon after the previous one was completed is also linked to an Autotask problem ticket; see [Recurrences](#recurrences).
+- **Pending closure.** If `ticket.resolvedstatus` is a status that an Autotask workflow rule completes later, such as *Pending Closure*, the ticket is awaiting closure until then. With `ticket.reopenstatus` set, a ticket awaiting closure is reopened if its group fires again; see [Pending closure](#pending-closure).
+- **Completed tickets are never reopened.** If a group fires again after its ticket was completed, including when a technician completed it while alerts were still firing, a new ticket is created that references the previous one. With a lookback period, a new ticket raised soon after the previous one was completed is also linked to an Autotask problem ticket; see [Recurrences](#recurrences).
 - **Orphaned tickets are handed over.** Changing route matchers, `group_by` or how routes nest gives the affected groups new group keys, leaving their open tickets behind. Alertmanager then sends the alerts again under the new keys. When a firing alert is still recorded on another group's open ticket, that ticket is orphaned: the alert is noted there as moved, naming its new ticket, and is no longer recorded on it. Once all its alerts have moved, the orphaned ticket is set to `ticket.resolvedstatus`. A new ticket that takes over alerts says which ticket it continues.
 - **Priority follows severity.** Optionally, a ticket's priority rises and falls with its alert group's severity, for example when an Alertmanager inhibition rule mutes a `warning` alert while the matching `critical` one fires. A person changing the priority takes over from then on. See [Priority and severity](#priority-and-severity).
 - **Retries.** Temporary Autotask failures (timeouts, 5xx, 429) return HTTP 500 so Alertmanager retries the notification. Permanent failures (Autotask rejecting the request) are logged with the payload and acknowledged so they are not retried forever.
@@ -67,6 +68,7 @@ These fields are a stable interface: renaming or removing one is a breaking chan
 | `.Alerts` | Ticket, Problem | The firing alerts. For a problem ticket, those of the new ticket. |
 | `.Fired`, `.Resolved` | Note | Alerts that fired and resolved since the last note. |
 | `.GroupResolved` | Note | Set when the whole alert group has resolved. |
+| `.Reopened` | Note | Set when the ticket was [awaiting closure](#pending-closure) and this note reopens it. |
 | `.TicketNumber` | Note, Problem | The ticket's number, e.g. `T20261019.0001`. For a problem ticket, the new ticket's. |
 | `.TicketTitle` | Problem | The new ticket's title, as its template rendered it. |
 | `.PreviousTicketNumber` | Problem | The number of the alert group's previous ticket. |
@@ -247,6 +249,7 @@ Each secret can be given directly or as a path to a file containing it, which su
 | `ticket.worktype` | | Work type ID of new tickets, sent as the ticket's `billingCodeID`. Optional; when unset none is sent, and Autotask or the ticket category decides. Set only when a ticket is created, so a work type changed by hand is kept. |
 | `ticket.duein` | | Due date of new tickets relative to creation, e.g. `4h`. Optional, but Autotask requires a due date unless the ticket category supplies one. |
 | `ticket.resolvedstatus` | `5` (*Complete*) | Status ID set when the whole group resolves. `0` leaves the status unchanged. |
+| `ticket.reopenstatus` | | Status ID set when an alert fires on a ticket [awaiting closure](#pending-closure), e.g. `8` (*In Progress*). Optional; `0` or unset leaves it awaiting closure. Requires a `ticket.resolvedstatus` other than `0` or `5`, and must differ from it. |
 | `problem.lookback` | | How soon after a group's previous ticket was completed a new ticket counts as a [recurrence](#recurrences), e.g. `72h`. Optional; `0` or unset disables recurrences. Requires `ticket.type` 2 (*Incident*). |
 | `problem.company` | | ID of the company problem tickets are raised against. Optional; `0` is your own company. When unset, a problem ticket is raised against the new ticket's company. |
 | `problem.queue` | | Queue ID of problem tickets. Optional; when unset, a problem ticket takes the new ticket's queue. |
@@ -309,9 +312,28 @@ ticket:
   defaultpriority: 3
 ```
 
+## Pending closure
+
+Some Autotask instances use a status such as *Pending Closure* that a workflow rule completes after a while, giving the service desk a chance to check the fix before the ticket closes. To use it, set `ticket.resolvedstatus` to that status. When the whole group resolves, the ticket is set to it and is then awaiting closure: it stays the group's current ticket, and further changes are noted on it, until Autotask completes it.
+
+Set `ticket.reopenstatus` as well to reopen a ticket awaiting closure when its group fires again. The change note adds a line saying the ticket was reopened, and the ticket is set to the reopen status. Choose that status deliberately: workflow rules or notifications tied to it, such as those for *New*, will run, and leaving a status that pauses the SLA resumes it.
+
+```yaml
+ticket:
+  resolvedstatus: 22 # Pending Closure
+  reopenstatus: 8    # In Progress
+```
+
+- **Only tickets am-autotask resolved are reopened.** A ticket a technician moved to the resolved status while its alerts were still firing keeps that status; further alerts are noted on it, and once Autotask completes it the next firing gets a new ticket. A ticket moved to any other status is left alone too.
+- **Completed tickets are never reopened.** Once Autotask completes the ticket, the group's next firing gets a new ticket, which is a [recurrence](#recurrences) if `problem.lookback` is set. The lookback period counts from when Autotask completed the ticket, not from when the group resolved.
+- **The due date is not reset**, so a reopened ticket may already be overdue.
+- **A reopen can race the workflow rule.** Autotask has no conditional update, so if the rule completes the ticket while am-autotask is adding the change note, the ticket is still reopened. The ticket is then open again with its completed date cleared, which suits its firing alerts, but anything that ran on completion, such as customer notifications, has already happened. The window is the few requests it takes to note the change.
+
+See [ADR-0008](docs/adr/0008-tickets-awaiting-closure-are-reopened.md).
+
 ## Recurrences
 
-Closed tickets are never reopened. When an alert group fires again soon after its ticket was completed, set `problem.lookback` to link the new ticket and the previous one through an Autotask problem ticket, so the service desk can see they share a cause. The new ticket is a recurrence when the group's most recent completed ticket was completed within the lookback period. Only that ticket counts, and only tickets of the same alert group.
+Completed tickets are never reopened. When an alert group fires again soon after its ticket was completed, set `problem.lookback` to link the new ticket and the previous one through an Autotask problem ticket, so the service desk can see they share a cause. The new ticket is a recurrence when the group's most recent completed ticket was completed within the lookback period. Only that ticket counts, and only tickets of the same alert group.
 
 - **The previous ticket is linked to an open problem ticket.** The new ticket is created linked to the same problem ticket, and its description says so.
 - **Otherwise**, a problem ticket is raised and both tickets are linked to it. The new ticket gets a note naming the problem ticket. The previous ticket stays complete; linking it does not reopen it.

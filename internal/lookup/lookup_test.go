@@ -68,7 +68,7 @@ func TestPicklists(t *testing.T) {
   4   Critical
   1   High
 
-ticket.status, ticket.resolvedstatus (Tickets status)
+ticket.status, ticket.resolvedstatus, ticket.reopenstatus (Tickets status)
   ID  LABEL
   1   New
   5   Complete
@@ -112,7 +112,7 @@ note.publish (TicketNotes publish)
   1   High      yes
   9   Old       no
 
-ticket.status, ticket.resolvedstatus (Tickets status)
+ticket.status, ticket.resolvedstatus, ticket.reopenstatus (Tickets status)
   ID  LABEL     ACTIVE
   1   New       yes
   5   Complete  yes

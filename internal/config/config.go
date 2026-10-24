@@ -41,8 +41,8 @@ type Config struct {
 	RecordedAlertsUDF   string
 	// AppliedPriorityUDF is empty unless ticket priority follows severity.
 	AppliedPriorityUDF string
-	Refresh             time.Duration
-	MissRefresh         time.Duration
+	Refresh            time.Duration
+	MissRefresh        time.Duration
 
 	// Receiver holds ticket and note settings; Now and Logger are unset.
 	Receiver receiver.Options
@@ -122,6 +122,7 @@ func AddFlags(f *pflag.FlagSet) {
 	f.Int("ticket.worktype", 0, "work type (billing code) ID of new tickets (optional)")
 	f.Duration("ticket.duein", 0, "due date of new tickets relative to creation (optional)")
 	f.Int("ticket.resolvedstatus", 5, "status ID set when the whole alert group resolves; 0 leaves the status unchanged")
+	f.Int("ticket.reopenstatus", 0, "status ID set when an alert fires on a ticket awaiting closure in ticket.resolvedstatus; 0 disables (optional, requires a ticket.resolvedstatus other than 5, Complete)")
 
 	f.Duration("problem.lookback", 0, "link a new ticket to a problem ticket when its alert group's previous ticket was completed within this long; 0 disables (optional, requires ticket.type 2, Incident)")
 	f.Var(&optionalID{}, "problem.company", "ID of the company problem tickets are raised against, which may be 0 for your own company; default the new ticket's company (optional)")
@@ -216,6 +217,7 @@ func FromFlags(f *pflag.FlagSet) (Config, error) {
 			WorkType:          k.Int("ticket.worktype"),
 			DueIn:             k.Duration("ticket.duein"),
 			ResolvedStatus:    k.Int("ticket.resolvedstatus"),
+			ReopenStatus:      k.Int("ticket.reopenstatus"),
 			Lookback:          k.Duration("problem.lookback"),
 			ProblemQueueID:    k.Int("problem.queue"),
 			NoteType:          k.Int("note.type"),
@@ -239,6 +241,7 @@ func FromFlags(f *pflag.FlagSet) (Config, error) {
 		}
 	}
 	errs = append(errs, problemErrors(cfg.Receiver)...)
+	errs = append(errs, reopenErrors(cfg.Receiver)...)
 
 	required := []struct {
 		key string
@@ -279,6 +282,22 @@ func FromFlags(f *pflag.FlagSet) (Config, error) {
 		return Config{}, &invalidError{errs}
 	}
 	return cfg, nil
+}
+
+// reopenErrors checks the reopen status: there is only a ticket awaiting
+// closure to reopen when the resolved status leaves it open, and reopening
+// must move it to another open status.
+func reopenErrors(r receiver.Options) []error {
+	switch {
+	case r.ReopenStatus == 0:
+	case r.ResolvedStatus == 0 || r.ResolvedStatus == receiver.TicketStatusComplete:
+		return []error{fmt.Errorf("ticket.reopenstatus requires a ticket.resolvedstatus other than 0 or %d (Complete), not %d", receiver.TicketStatusComplete, r.ResolvedStatus)}
+	case r.ReopenStatus == receiver.TicketStatusComplete:
+		return []error{fmt.Errorf("ticket.reopenstatus must not be %d (Complete)", receiver.TicketStatusComplete)}
+	case r.ReopenStatus == r.ResolvedStatus:
+		return []error{errors.New("ticket.reopenstatus must differ from ticket.resolvedstatus")}
+	}
+	return nil
 }
 
 // problemErrors checks the recurrence settings: problem tickets can only link
@@ -509,6 +528,7 @@ func (c Config) PicklistChecks() []autotask.PicklistCheck {
 	}{
 		{"Tickets", "status", "ticket.status", r.Status},
 		{"Tickets", "status", "ticket.resolvedstatus", r.ResolvedStatus},
+		{"Tickets", "status", "ticket.reopenstatus", r.ReopenStatus},
 		{"Tickets", "ticketType", "ticket.type", r.TicketType},
 		{"Tickets", "source", "ticket.source", r.Source},
 		{"Tickets", "queueID", "ticket.queue", r.QueueID},

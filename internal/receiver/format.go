@@ -95,10 +95,15 @@ func ticketNotices(ambiguous []int64, previous *Ticket, continues []Ticket, over
 	return notices
 }
 
-// noteNotices are the system notices for a change note: overflow, and the
-// line describing any priority change.
-func noteNotices(overflow bool, priority string) []string {
+const reopenNotice = "This ticket was awaiting closure and has been reopened because its alert group fired again."
+
+// noteNotices are the system notices for a change note: reopening,
+// overflow, and the line describing any priority change.
+func noteNotices(reopened, overflow bool, priority string) []string {
 	var notices []string
+	if reopened {
+		notices = append(notices, reopenNotice)
+	}
 	if overflow {
 		notices = append(notices, "NOTE: "+overflowNotice)
 	}
