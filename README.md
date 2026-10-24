@@ -158,7 +158,7 @@ All three list only active values, companies and work types, as inactive ones ar
 
 ```sh
 docker run --rm -v ./config.yaml:/etc/am-autotask/config.yaml \
-  ghcr.io/andrewheberle/am-autotask:v0.10.0 lookup picklists --config /etc/am-autotask/config.yaml # x-release-please-version
+  ghcr.io/andrewheberle/am-autotask:v0.11.0 lookup picklists --config /etc/am-autotask/config.yaml # x-release-please-version
 ```
 
 ### Company selectors
@@ -398,7 +398,7 @@ am-autotask serve --config config.yaml
 
 ```sh
 docker run -v ./config.yaml:/etc/am-autotask/config.yaml \
-  ghcr.io/andrewheberle/am-autotask:v0.10.0 serve --config /etc/am-autotask/config.yaml # x-release-please-version
+  ghcr.io/andrewheberle/am-autotask:v0.11.0 serve --config /etc/am-autotask/config.yaml # x-release-please-version
 ```
 
 ### Examples

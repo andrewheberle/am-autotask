@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.11.0](https://github.com/andrewheberle/am-autotask/compare/v0.10.0...v0.11.0) (2026-10-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* rename orphaned_tickets_completed_total to orphaned_tickets_handed_over_total ([#46](https://github.com/andrewheberle/am-autotask/issues/46))
+
+### Features
+
+* rename orphaned_tickets_completed_total to orphaned_tickets_handed_over_total ([#46](https://github.com/andrewheberle/am-autotask/issues/46)) ([b2d047c](https://github.com/andrewheberle/am-autotask/commit/b2d047c50515d1ebd4e9456dadb9d8ac43fa2a26))
+* reopen tickets awaiting closure when their alert group fires again ([#44](https://github.com/andrewheberle/am-autotask/issues/44)) ([67313b7](https://github.com/andrewheberle/am-autotask/commit/67313b7a7211dc78ca668f5e3c3342683da49a41))
+
 ## [0.10.0](https://github.com/andrewheberle/am-autotask/compare/v0.9.0...v0.10.0) (2026-10-19)
 
 
