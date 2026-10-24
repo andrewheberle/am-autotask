@@ -9,6 +9,7 @@ Running more than one replica is for availability, not throughput: the Autotask 
 - **Consistent-hash forwarding between replicas**, each owning some alert groups: no store, but two replicas own a group during membership changes, so it needs the same fencing for much more machinery.
 - **client-go's leaderelection package**: proven, but pulls in a large dependency tree for three HTTP calls. The Lease protocol is small and the API server's `resourceVersion` check does the hard part, so it is written with the standard library.
 - **Standbys reporting not ready**, so the Service only routes to the leader: no forwarding, but a rolling update never finishes, because the new pods can't become ready while the old leader holds the Lease. Labelling the leader's pod for the Service to select instead needs `pods/patch` and can point at the wrong pod after a failover.
+- **Standbys redirecting Alertmanager to the leader** with a 307, rather than proxying: one hop fewer, but the redirect crosses hosts, from the Service's name to the leader's pod IP, and since Alertmanager 0.34 (prometheus/common 0.69) credentials aren't sent on cross-host redirects, so the leader would answer 401, which Alertmanager doesn't retry. It also fails with `follow_redirects: false`, needs Alertmanager to reach pod IPs directly, and can't carry the header that stops a stale leader forwarding again.
 
 ## Consequences
 
