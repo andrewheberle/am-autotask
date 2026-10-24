@@ -79,6 +79,9 @@ const (
 	TicketTypeProblem  = 3
 )
 
+// TicketStatusComplete is Autotask's system Complete ticket status.
+const TicketStatusComplete = 5
+
 // NewTicket is a ticket to create. Zero-valued optional IDs are omitted.
 type NewTicket struct {
 	CompanyID      int64
@@ -196,6 +199,10 @@ type Options struct {
 	// ResolvedStatus is applied when the whole alert group resolves; zero
 	// leaves the ticket status unchanged.
 	ResolvedStatus int
+	// ReopenStatus, when not 0, is applied when an alert fires on a ticket
+	// awaiting closure: in ResolvedStatus with no recorded alerts. Requires
+	// a ResolvedStatus other than [TicketStatusComplete].
+	ReopenStatus int
 
 	NoteType    int
 	NotePublish int
@@ -250,6 +257,8 @@ type Observer interface {
 	// Recurrence is called for each recurrence with its outcome:
 	// [RecurrenceFollowed], [RecurrenceRaised] or [RecurrenceFailed].
 	Recurrence(outcome string)
+	// Reopened is called when a ticket awaiting closure is reopened.
+	Reopened()
 }
 
 type noopObserver struct{}
@@ -261,6 +270,7 @@ func (noopObserver) PriorityChanged(string) {}
 func (noopObserver) PriorityOverridden()    {}
 func (noopObserver) TemplateFailed(string)  {}
 func (noopObserver) Recurrence(string)      {}
+func (noopObserver) Reopened()              {}
 
 // Receiver applies notifications to Autotask.
 type Receiver struct {
@@ -284,6 +294,16 @@ func New(at Autotask, matcher CompanyMatcher, locker Locker, opts Options) (*Rec
 	}
 	if opts.Lookback > 0 && opts.TicketType != TicketTypeIncident {
 		return nil, errors.New("recurrences require the Incident ticket type")
+	}
+	if opts.ReopenStatus != 0 {
+		switch {
+		case opts.ResolvedStatus == 0 || opts.ResolvedStatus == TicketStatusComplete:
+			return nil, errors.New("reopen status requires a resolved status other than Complete")
+		case opts.ReopenStatus == TicketStatusComplete:
+			return nil, errors.New("reopen status must not be Complete")
+		case opts.ReopenStatus == opts.ResolvedStatus:
+			return nil, errors.New("reopen status must differ from the resolved status")
+		}
 	}
 	if opts.SeverityLabel == "" {
 		opts.SeverityLabel = "severity"
@@ -444,6 +464,7 @@ func (r *Receiver) update(ctx context.Context, n Notification, t Ticket) (change
 		clear(recorded)
 	}
 	noted := len(fired) > 0 || len(resolved) > 0 || (groupResolved && t.RecordedAlerts != "")
+	reopened := r.reopens(t, groupResolved, fired)
 
 	// priority only follows alerts firing or resolving, not alerts that are
 	// silenced or inhibited and so missing from the notification
@@ -462,12 +483,13 @@ func (r *Receiver) update(ctx context.Context, n Notification, t Ticket) (change
 			Fired:         alertData(fired),
 			Resolved:      alertData(resolved),
 			GroupResolved: groupResolved,
+			Reopened:      reopened,
 			TicketNumber:  t.Number,
 		}
 		if err := r.at.CreateNote(ctx, NewNote{
 			TicketID:    t.ID,
 			Title:       truncate(r.render(ctx, TemplateNoteTitle, data), maxNoteTitle),
-			Description: truncate(withNotices(noteNotices(overflow, pc.note), r.render(ctx, TemplateNoteDescription, data)), maxNoteDescription),
+			Description: truncate(withNotices(noteNotices(reopened, overflow, pc.note), r.render(ctx, TemplateNoteDescription, data)), maxNoteDescription),
 			NoteType:    r.opts.NoteType,
 			Publish:     r.opts.NotePublish,
 		}); err != nil {
@@ -477,6 +499,9 @@ func (r *Receiver) update(ctx context.Context, n Notification, t Ticket) (change
 		update.RecordedAlerts = &value
 		update.Priority = pc.priority
 		update.AppliedPriority = pc.applied
+		if reopened {
+			update.Status = &r.opts.ReopenStatus
+		}
 	}
 
 	// also applied when a previous attempt noted the resolution but failed
@@ -492,8 +517,24 @@ func (r *Receiver) update(ctx context.Context, n Notification, t Ticket) (change
 		return false, fmt.Errorf("updating ticket %s: %w", t.Number, err)
 	}
 	r.observePriority(ctx, t, pc)
+	if reopened {
+		trace.SpanFromContext(ctx).SetAttributes(attribute.Bool("am_autotask.reopened", true))
+		r.opts.Logger.InfoContext(ctx, "reopened ticket awaiting closure", "ticket", t.Number)
+		r.opts.Observer.Reopened()
+	}
 
 	return true, nil
+}
+
+// reopens reports whether a notification reopens a ticket awaiting closure:
+// one the receiver set to the resolved status when its group resolved, so
+// with no recorded alerts, and that now has alerts firing again. A ticket a
+// person moved to the resolved status while alerts were recorded is left
+// alone. The status is set alongside the change note's recorded alerts, so
+// a failed update reopens on retry.
+func (r *Receiver) reopens(t Ticket, groupResolved bool, fired []Alert) bool {
+	return r.opts.ReopenStatus != 0 && !groupResolved && len(fired) > 0 &&
+		t.Status == r.opts.ResolvedStatus && t.RecordedAlerts == ""
 }
 
 // create raises a ticket for an alert group with no current ticket,

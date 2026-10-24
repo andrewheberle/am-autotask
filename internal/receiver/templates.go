@@ -70,7 +70,9 @@ type NoteData struct {
 	Resolved []AlertData
 	// GroupResolved is set when the whole alert group has resolved.
 	GroupResolved bool
-	TicketNumber  string
+	// Reopened is set when the ticket was awaiting closure and is reopened.
+	Reopened     bool
+	TicketNumber string
 }
 
 // ProblemData is the data the problem ticket title and description

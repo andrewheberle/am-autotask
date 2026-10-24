@@ -62,7 +62,7 @@ type picklist struct {
 
 var picklists = []picklist{
 	{settings: "ticket.priorities, ticket.defaultpriority", entity: "Tickets", field: "priority"},
-	{settings: "ticket.status, ticket.resolvedstatus", entity: "Tickets", field: "status"},
+	{settings: "ticket.status, ticket.resolvedstatus, ticket.reopenstatus", entity: "Tickets", field: "status"},
 	{settings: "ticket.type", entity: "Tickets", field: "ticketType"},
 	{settings: "ticket.source", entity: "Tickets", field: "source"},
 	{settings: "ticket.queue", entity: "Tickets", field: "queueID"},

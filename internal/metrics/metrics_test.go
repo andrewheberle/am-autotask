@@ -79,3 +79,15 @@ func TestLeaderChangesAndForwardsAreCounted(t *testing.T) {
 		t.Errorf("forwarded{delivered} = %v, want 1", got)
 	}
 }
+
+func TestReopenedTicketsAreCounted(t *testing.T) {
+	m := newMetrics(true, nil)
+
+	if got := value(t, m, "am_autotask_tickets_reopened_total", ""); got != 0 {
+		t.Errorf("reopened = %v before any reopen, want 0", got)
+	}
+	m.Reopened()
+	if got := value(t, m, "am_autotask_tickets_reopened_total", ""); got != 1 {
+		t.Errorf("reopened = %v, want 1", got)
+	}
+}

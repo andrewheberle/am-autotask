@@ -10,12 +10,19 @@ import (
 
 // recordingObserver records what the receiver reports to an Observer.
 type recordingObserver struct {
-	mu         sync.Mutex
-	catchAll   []string
-	priorities []string
-	overrides  int
+	mu          sync.Mutex
+	catchAll    []string
+	priorities  []string
+	overrides   int
 	templates   []string
 	recurrences []string
+	reopened    int
+}
+
+func (o *recordingObserver) Reopened() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.reopened++
 }
 
 func (o *recordingObserver) Recurrence(outcome string) {

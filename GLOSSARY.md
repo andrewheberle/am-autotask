@@ -39,8 +39,16 @@ The company that receives tickets for alert groups matched by no company's selec
 _Avoid_: Default company, fallback org
 
 **Ticket**:
-The Autotask ticket representing exactly one alert group. A group has at most one open ticket at a time, its **Current Ticket**; once closed, a ticket is never reopened and the group's next firing gets a new one.
+The Autotask ticket representing exactly one alert group. A group has at most one open ticket at a time, its **Current Ticket**; once completed, a ticket is never reopened and the group's next firing gets a new one.
 _Avoid_: Case, incident
+
+**Awaiting Closure**:
+A ticket whose alert group has resolved, left by am-autotask in a status that Autotask completes later. It stays its group's current ticket until completed. A ticket a person moved to the same status while alerts were still recorded is not awaiting closure.
+_Avoid_: Pending, resolved ticket
+
+**Reopen**:
+Returning a ticket awaiting closure to work because its alert group fired again. Only a ticket awaiting closure is reopened; a completed ticket never is.
+_Avoid_: Reactivate
 
 **Recurrence**:
 An alert group getting a new ticket while its previous ticket was completed within the lookback period. Only the group's most recent completed ticket is considered.

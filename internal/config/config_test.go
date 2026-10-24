@@ -623,6 +623,49 @@ func TestProblemSettings(t *testing.T) {
 	}
 }
 
+func TestReopenStatus(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		want    int
+		wantErr string
+	}{
+		{name: "disabled by default"},
+		{name: "from flags", args: []string{"--ticket.resolvedstatus", "22", "--ticket.reopenstatus", "8"}, want: 8},
+		{name: "resolved status Complete", args: []string{"--ticket.reopenstatus", "8"}, wantErr: "ticket.reopenstatus requires a ticket.resolvedstatus other than 0 or 5 (Complete), not 5"},
+		{name: "resolved status disabled", args: []string{"--ticket.resolvedstatus", "0", "--ticket.reopenstatus", "8"}, wantErr: "not 0"},
+		{name: "reopen status Complete", args: []string{"--ticket.resolvedstatus", "22", "--ticket.reopenstatus", "5"}, wantErr: "ticket.reopenstatus must not be 5 (Complete)"},
+		{name: "same as resolved status", args: []string{"--ticket.resolvedstatus", "22", "--ticket.reopenstatus", "22"}, wantErr: "ticket.reopenstatus must differ from ticket.resolvedstatus"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := loadArgs(append([]string{"--config", writeFile(t, "c.yaml", minimalYAML)}, tt.args...))
+
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("err = %v, want one containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := cfg.Receiver.ReopenStatus; got != tt.want {
+				t.Errorf("ReopenStatus = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPicklistChecksIncludeReopenStatus(t *testing.T) {
+	cfg := load(t, "--config", writeFile(t, "c.yaml", minimalYAML), "--ticket.resolvedstatus", "22", "--ticket.reopenstatus", "8")
+
+	want := autotask.PicklistCheck{Entity: "Tickets", Field: "status", Value: 8, Setting: "ticket.reopenstatus"}
+	if !slices.Contains(cfg.PicklistChecks(), want) {
+		t.Errorf("missing check %+v", want)
+	}
+}
+
 func TestPicklistChecksIncludeProblemQueue(t *testing.T) {
 	cfg := load(t, "--config", writeFile(t, "c.yaml", minimalYAML+"  type: 2\nproblem:\n  lookback: 1h\n  queue: 29\n"))
 

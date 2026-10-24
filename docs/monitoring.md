@@ -24,7 +24,7 @@ All am-autotask metrics are prefixed `am_autotask_`. The standard Go runtime (`g
 | `am_autotask_notes_created_total` | counter | | Ticket notes created, including notes on duplicate and orphaned tickets. |
 | `am_autotask_autotask_errors_total` | counter | `operation`, `kind` | Failed Autotask requests made while handling notifications. `operation` is one of `open_tickets`, `previous_ticket`, `get_ticket`, `open_alert_tickets`, `create_ticket`, `create_note` or `update_ticket`; `kind` is `temporary`, `permanent` or `rate_limited` (HTTP 429). Company selector reloads are not counted here; see `am_autotask_company_selectors_age_seconds`. |
 | `am_autotask_alerts_moved_total` | counter | | Alerts moved off orphaned tickets onto their alert group's current ticket. |
-| `am_autotask_orphaned_tickets_completed_total` | counter | | Orphaned tickets completed because all of their alerts moved. |
+| `am_autotask_orphaned_tickets_completed_total` | counter | | Orphaned tickets set to `ticket.resolvedstatus` because all of their alerts moved. That completes them with the default status of `5` (Complete); with another status, such as Pending Closure, they are [awaiting closure](../README.md#pending-closure) until Autotask completes them. |
 | `am_autotask_company_selectors_age_seconds` | gauge | | Time since company selectors were last loaded from Autotask. It drops back to zero on each successful reload, every `company.refresh` (default 15 minutes), and keeps growing while reloads fail. It is zero until the first load. |
 | `am_autotask_company_selectors_companies` | gauge | `state` | Companies with company selectors in the last successful load: `valid`, or `invalid` (their selectors do not parse, so they are skipped and no alert group can match them). |
 | `am_autotask_catchall_tickets_total` | counter | `reason` | Tickets raised against the catch-all company: `unmatched` (no company's selectors matched the alert group) or `ambiguous` (more than one company's did). |
@@ -32,6 +32,7 @@ All am-autotask metrics are prefixed `am_autotask_`. The standard Go runtime (`g
 | `am_autotask_ticket_priority_overrides_total` | counter | | Tickets found with a priority a person changed, which then no longer follows severity. Counted once per ticket. A high rate compared with `am_autotask_ticket_priority_changes_total` suggests `ticket.priorities` or `ticket.severityorder` doesn't match how the service desk prioritises. |
 | `am_autotask_template_errors_total` | counter | `template` | [Ticket templates](../README.md#ticket-templates) from the templates file that failed on a notification, so the built-in wording was used instead: `ticket.title`, `ticket.description`, `note.title`, `note.description`, `problem.title` or `problem.description`. Always zero without a templates file. |
 | `am_autotask_recurrences_total` | counter | `outcome` | [Recurrences](../README.md#recurrences): tickets raised soon after their alert group's previous ticket was completed, by outcome: `followed` (linked to the previous ticket's open problem ticket), `raised` (a new problem ticket was raised) or `failed` (left for a person to link; see [AmAutotaskRecurrenceLinkFailed](#amautotaskrecurrencelinkfailed)). Always zero unless `problem.lookback` is set. |
+| `am_autotask_tickets_reopened_total` | counter | | Tickets [awaiting closure](../README.md#pending-closure) reopened because their alert group fired again. Always zero unless `ticket.reopenstatus` is set. |
 | `am_autotask_ready` | gauge | | `1` once startup has completed and notifications are being handled, otherwise `0`. With [leader election](../README.md#multiple-replicas), standbys are ready too, as they forward notifications to the leader, and a replica that cannot reach the Kubernetes API is not ready. |
 | `am_autotask_leader` | gauge | | `1` while this replica handles notifications itself, otherwise `0`. With leader election that is while it holds the Lease; without, a ready instance is its own leader. Summed over replicas it should be `1`. |
 | `am_autotask_leader_transitions_total` | counter | | Times this replica became or stopped being the leader. Always zero without leader election. |
@@ -67,6 +68,9 @@ increase(am_autotask_ticket_priority_overrides_total[1d])
 
 # recurrences per day, by outcome
 sum by (outcome) (increase(am_autotask_recurrences_total[1d]))
+
+# tickets awaiting closure reopened per day
+increase(am_autotask_tickets_reopened_total[1d])
 
 # which replica is the leader, and how often leadership moves
 am_autotask_leader == 1
