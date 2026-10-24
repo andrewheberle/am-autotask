@@ -91,3 +91,15 @@ func TestReopenedTicketsAreCounted(t *testing.T) {
 		t.Errorf("reopened = %v, want 1", got)
 	}
 }
+
+func TestHandedOverOrphansAreCounted(t *testing.T) {
+	m := newMetrics(true, nil)
+
+	if got := value(t, m, "am_autotask_orphaned_tickets_handed_over_total", ""); got != 0 {
+		t.Errorf("handed over = %v before any handover, want 0", got)
+	}
+	m.OrphanHandedOver()
+	if got := value(t, m, "am_autotask_orphaned_tickets_handed_over_total", ""); got != 1 {
+		t.Errorf("handed over = %v, want 1", got)
+	}
+}

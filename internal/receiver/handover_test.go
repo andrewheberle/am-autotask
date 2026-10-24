@@ -142,6 +142,38 @@ func TestOrphanedTicketIsOnlyNotedWhenResolvedStatusDisabled(t *testing.T) {
 	}
 }
 
+func TestHandedOverOrphansAreReported(t *testing.T) {
+	tests := []struct {
+		name           string
+		resolvedStatus int
+		// moved are the alerts that move to the new alert group
+		moved []receiver.Alert
+		want  int
+	}{
+		{"completed", completeStatus, []receiver.Alert{hostAlert("aaaa", "firing", "web1"), hostAlert("bbbb", "firing", "web2")}, 1},
+		{"awaiting closure", 22, []receiver.Alert{hostAlert("aaaa", "firing", "web1"), hostAlert("bbbb", "firing", "web2")}, 1},
+		{"resolved status disabled", 0, []receiver.Alert{hostAlert("aaaa", "firing", "web1"), hostAlert("bbbb", "firing", "web2")}, 1},
+		{"alerts still recorded", completeStatus, []receiver.Alert{hostAlert("aaaa", "firing", "web1")}, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			at := newFakeAutotask()
+			obs := &recordingObserver{}
+			opts := testOptions()
+			opts.ResolvedStatus = tt.resolvedStatus
+			opts.Observer = obs
+			r := newReceiver(t, at, opts)
+			handle(t, r, notification(hostAlert("aaaa", "firing", "web1"), hostAlert("bbbb", "firing", "web2")))
+
+			handle(t, r, regrouped("perth", tt.moved...))
+
+			if obs.handedOver != tt.want {
+				t.Errorf("handed over = %d, want %d", obs.handedOver, tt.want)
+			}
+		})
+	}
+}
+
 func TestFailedMoveIsRetried(t *testing.T) {
 	at := newFakeAutotask()
 	r := newReceiver(t, at, testOptions())

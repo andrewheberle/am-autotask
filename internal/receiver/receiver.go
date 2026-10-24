@@ -241,9 +241,9 @@ type Observer interface {
 	// AlertsMoved is called with the number of alerts moved off an orphaned
 	// ticket.
 	AlertsMoved(n int)
-	// OrphanCompleted is called when an orphaned ticket is completed because
-	// all of its alerts have moved.
-	OrphanCompleted()
+	// OrphanHandedOver is called when all of an orphaned ticket's alerts
+	// have moved to their new tickets.
+	OrphanHandedOver()
 	// PriorityChanged is called when a ticket's priority follows its alert
 	// group's severity, with the direction: [PriorityRaised] or
 	// [PriorityLowered].
@@ -265,7 +265,7 @@ type noopObserver struct{}
 
 func (noopObserver) CatchAll(string)        {}
 func (noopObserver) AlertsMoved(int)        {}
-func (noopObserver) OrphanCompleted()       {}
+func (noopObserver) OrphanHandedOver()      {}
 func (noopObserver) PriorityChanged(string) {}
 func (noopObserver) PriorityOverridden()    {}
 func (noopObserver) TemplateFailed(string)  {}
