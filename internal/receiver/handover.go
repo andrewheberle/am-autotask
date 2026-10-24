@@ -148,8 +148,8 @@ func (r *Receiver) moveFrom(ctx context.Context, n Notification, current Ticket,
 	r.opts.Logger.InfoContext(ctx, "moved alerts off orphaned ticket",
 		"orphan", t.Number, "to", current.Number, "alerts", len(moved), "emptied", emptied)
 	r.opts.Observer.AlertsMoved(len(moved))
-	if emptied && r.opts.ResolvedStatus != 0 {
-		r.opts.Observer.OrphanCompleted()
+	if emptied {
+		r.opts.Observer.OrphanHandedOver()
 	}
 
 	return len(moved), nil

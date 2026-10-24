@@ -26,7 +26,7 @@ type Metrics struct {
 	notesCreated   prometheus.Counter
 	autotaskErrors *prometheus.CounterVec
 	alertsMoved    prometheus.Counter
-	orphansDone    prometheus.Counter
+	handedOver     prometheus.Counter
 	catchAll       *prometheus.CounterVec
 	priorities     *prometheus.CounterVec
 	overrides      prometheus.Counter
@@ -81,9 +81,9 @@ func New(opts Options) *Metrics {
 			Namespace: namespace, Name: "alerts_moved_total",
 			Help: "Alerts moved off orphaned tickets onto their alert group's current ticket.",
 		}),
-		orphansDone: prometheus.NewCounter(prometheus.CounterOpts{
-			Namespace: namespace, Name: "orphaned_tickets_completed_total",
-			Help: "Orphaned tickets completed because all of their alerts moved.",
+		handedOver: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: namespace, Name: "orphaned_tickets_handed_over_total",
+			Help: "Orphaned tickets handed over because all of their alerts moved to their new tickets.",
 		}),
 		catchAll: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: namespace, Name: "catchall_tickets_total",
@@ -150,7 +150,7 @@ func New(opts Options) *Metrics {
 	}
 
 	m.registry.MustRegister(
-		m.notifications, m.ticketsCreated, m.notesCreated, m.autotaskErrors, m.alertsMoved, m.orphansDone,
+		m.notifications, m.ticketsCreated, m.notesCreated, m.autotaskErrors, m.alertsMoved, m.handedOver,
 		m.catchAll, m.priorities, m.overrides, m.templates, m.recurrences, m.reopened, m.duration, m.transitions, m.forwarded,
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: namespace, Name: "company_selectors_age_seconds",
@@ -198,9 +198,9 @@ func (m *Metrics) AlertsMoved(n int) {
 	m.alertsMoved.Add(float64(n))
 }
 
-// OrphanCompleted implements [receiver.Observer].
-func (m *Metrics) OrphanCompleted() {
-	m.orphansDone.Inc()
+// OrphanHandedOver implements [receiver.Observer].
+func (m *Metrics) OrphanHandedOver() {
+	m.handedOver.Inc()
 }
 
 // PriorityChanged implements [receiver.Observer].

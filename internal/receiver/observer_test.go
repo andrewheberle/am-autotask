@@ -17,6 +17,13 @@ type recordingObserver struct {
 	templates   []string
 	recurrences []string
 	reopened    int
+	handedOver  int
+}
+
+func (o *recordingObserver) OrphanHandedOver() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.handedOver++
 }
 
 func (o *recordingObserver) Reopened() {
@@ -32,7 +39,6 @@ func (o *recordingObserver) Recurrence(outcome string) {
 }
 
 func (o *recordingObserver) AlertsMoved(int)  {}
-func (o *recordingObserver) OrphanCompleted() {}
 
 func (o *recordingObserver) PriorityChanged(direction string) {
 	o.mu.Lock()

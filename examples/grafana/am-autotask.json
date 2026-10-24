@@ -990,7 +990,7 @@
           "id": 16,
           "type": "timeseries",
           "title": "Orphaned tickets",
-          "description": "Alerts moved off orphaned tickets onto their alert group's current ticket, and orphaned tickets completed because all of their alerts moved, per day.",
+          "description": "Alerts moved off orphaned tickets onto their alert group's current ticket, and orphaned tickets handed over because all of their alerts moved, per day.",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -1040,8 +1040,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(increase(am_autotask_orphaned_tickets_completed_total{job=\"$job\", instance=~\"$instance\"}[1d]))",
-              "legendFormat": "orphaned tickets completed",
+              "expr": "sum(increase(am_autotask_orphaned_tickets_handed_over_total{job=\"$job\", instance=~\"$instance\"}[1d]))",
+              "legendFormat": "orphaned tickets handed over",
               "refId": "B"
             }
           ]
