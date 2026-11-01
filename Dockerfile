@@ -1,4 +1,4 @@
-FROM gcr.io/distroless/base-debian13:nonroot@sha256:a0d70d6a97cd697d9362bc2aae4a6560dd65817e365d0043b07325a97975dc91
+FROM gcr.io/distroless/base-debian13:nonroot@sha256:9039a88709bcc2bacf5a2faac331d65dd6840f763f225ad9594cc0c67bcd0fba
 ARG TARGETPLATFORM
 EXPOSE 8080
 ENTRYPOINT [ "/usr/bin/am-autotask" ]
