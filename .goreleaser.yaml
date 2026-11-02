@@ -120,9 +120,19 @@ dockers_v2:
     disable: false
     platforms:
       - linux/amd64
+    # The image is built reproducibly, so a re-run of a failed release pushes
+    # the same digest for the version tag rather than replacing it (see
+    # docs/adr/0009): timestamps come from the commit, and buildx's own
+    # provenance attestation, which records the build's start and finish
+    # times, is left out. The release workflow attests the image digest with
+    # actions/attest-build-provenance instead.
+    build_args:
+      SOURCE_DATE_EPOCH: "{{ .CommitTimestamp }}"
+    flags:
+      - --provenance=false
     labels:
       "org.opencontainers.image.description": "A webhook receiver to Alertmanager to create tickets in Autotask"
-      "org.opencontainers.image.created": "{{ .Date }}"
+      "org.opencontainers.image.created": "{{ .CommitDate }}"
       "org.opencontainers.image.name": "{{ .ProjectName }}"
       "org.opencontainers.image.revision": "{{ .FullCommit }}"
       "org.opencontainers.image.version": "{{ .Version }}"
