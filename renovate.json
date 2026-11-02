@@ -15,6 +15,21 @@
       "automerge": true
     },
     {
+      "description": "Go toolchain updates ship as releases, like base image updates; see docs/adr/0011",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["toolchain"],
+      "matchPackageNames": ["go"],
+      "semanticCommitType": "fix"
+    },
+    {
+      "description": "Go toolchain patch updates carry security fixes, so they automerge once build passes; see docs/adr/0011",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["toolchain"],
+      "matchPackageNames": ["go"],
+      "matchUpdateTypes": ["patch"],
+      "automerge": true
+    },
+    {
       "description": "deb-s3 only publishes .deb packages in the release workflow, so updates must not trigger a release",
       "matchDatasources": ["rubygems"],
       "matchPackageNames": ["deb-s3"],
