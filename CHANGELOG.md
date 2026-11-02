@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.0](https://github.com/andrewheberle/am-autotask/compare/v0.12.0...v0.13.0) (2026-11-02)
+
+
+### Features
+
+* **cli:** add long help and generated command reference ([#57](https://github.com/andrewheberle/am-autotask/issues/57)) ([0b0f55b](https://github.com/andrewheberle/am-autotask/commit/0b0f55b6311ccf7eab06d2c960b332d154a239ad))
+* publish .deb packages to an apt repository ([#59](https://github.com/andrewheberle/am-autotask/issues/59)) ([e1f0aef](https://github.com/andrewheberle/am-autotask/commit/e1f0aefa60b6f0334f313bb5bc62415ccf1a4c6b))
+
 ## [0.12.0](https://github.com/andrewheberle/am-autotask/compare/v0.11.0...v0.12.0) (2026-11-02)
 
 
