@@ -13,6 +13,13 @@
       "semanticCommitType": "fix",
       "schedule": ["before 6am on monday"],
       "automerge": true
+    },
+    {
+      "description": "deb-s3 only publishes .deb packages in the release workflow, so updates must not trigger a release",
+      "matchDatasources": ["rubygems"],
+      "matchPackageNames": ["deb-s3"],
+      "semanticCommitType": "chore",
+      "semanticCommitScope": "ci"
     }
   ]
 }

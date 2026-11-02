@@ -72,6 +72,8 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       AWS_ENDPOINT_URL: https://${{ vars.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
       GPG_KEY_ID: ${{ vars.GPG_KEY_ID }}
+      # renovate: datasource=rubygems depName=deb-s3
+      DEB_S3_VERSION: 26.1.0
       # R2 does not support the CRC32 checksums newer AWS SDKs send by default
       # https://github.com/aws/aws-sdk-ruby/issues/3166
       AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
@@ -87,7 +89,7 @@ jobs:
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
       - name: Install deb-s3
-        run: sudo gem install deb-s3 --version 26.1.0 --no-document
+        run: sudo gem install deb-s3 --version "$DEB_S3_VERSION" --no-document
       # credentials come from AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, so
       # they are not on the command line
       - name: Upload .deb packages to apt repository
