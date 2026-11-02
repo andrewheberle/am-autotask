@@ -9,6 +9,8 @@ Autotask based on firing alert groups.
 - `cmd/` - entrypoints for commands; should only include minimal code then call Execute of the relevant package
 - `internal/` - application packages; not importable by other modules
 - `pkg/` - application packages; importable by others
+- `systemd/` - the systemd unit installed by the `.deb` package
+- `deb/` - the `.deb` package's maintainer scripts and example configuration
 - `docs/` - the `am-autotask*.md` files are generated from the command definitions; everything else is maintained by hand
 
 ## Build, test, lint
@@ -36,6 +38,7 @@ Run these before considering any change complete:
 
 ## Documentation
 - Command line flag or behaviour changes must be reflected in `README.md` and `docs/`
+- Changes to the systemd unit or `.deb` package scripts must be reflected in the Installing section of `README.md`
 - The CLI docs (`docs/am-autotask*.md`) are generated with `go generate ./...` from the flags and the long descriptions and examples in `internal/cli/help.go`; edit those rather than the markdown. A test fails if the committed docs are out of date
 
 ## Testing

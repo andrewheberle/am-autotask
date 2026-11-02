@@ -1,0 +1,49 @@
+[Unit]
+Description=Alertmanager webhook receiver that raises Autotask tickets
+Documentation=https://github.com/andrewheberle/am-autotask
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/am-autotask serve --config /etc/am-autotask/config.yaml \
+  --webhook.tokenfile=${CREDENTIALS_DIRECTORY}/webhook-token \
+  --autotask.usernamefile=${CREDENTIALS_DIRECTORY}/autotask-username \
+  --autotask.secretfile=${CREDENTIALS_DIRECTORY}/autotask-secret \
+  --autotask.integrationcodefile=${CREDENTIALS_DIRECTORY}/autotask-integrationcode
+Restart=on-failure
+RestartSec=5s
+
+# Secrets are read by systemd from these root-only files and passed to the
+# service, which runs as a dynamic user and cannot read them itself
+LoadCredential=webhook-token:/etc/am-autotask/credentials/webhook-token
+LoadCredential=autotask-username:/etc/am-autotask/credentials/autotask-username
+LoadCredential=autotask-secret:/etc/am-autotask/credentials/autotask-secret
+LoadCredential=autotask-integrationcode:/etc/am-autotask/credentials/autotask-integrationcode
+
+# Autotask holds all state, so the service needs no user or writable storage
+DynamicUser=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
