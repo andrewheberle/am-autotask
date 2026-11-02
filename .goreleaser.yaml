@@ -125,7 +125,8 @@ dockers_v2:
     # docs/adr/0009): timestamps come from the commit, and buildx's own
     # provenance attestation, which records the build's start and finish
     # times, is left out. The release workflow attests the image digest with
-    # actions/attest-build-provenance instead.
+    # actions/attest-build-provenance instead, and pushes that attestation to
+    # the registry as a referrer, which leaves the digest unchanged.
     build_args:
       SOURCE_DATE_EPOCH: "{{ .CommitTimestamp }}"
     flags:

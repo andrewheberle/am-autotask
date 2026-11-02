@@ -44,9 +44,26 @@ jobs:
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-checksums: ./dist/checksums.txt
+      # digests.txt has one line per tag, all with the same digest, but
+      # push-to-registry takes exactly one subject, so the image is attested by
+      # name and digest
+      - name: Read image digest
+        id: image
+        run: |
+          digests=$(awk '{ print $1 }' dist/digests.txt | sort -u)
+          if [ "$(printf '%s\n' "$digests" | grep -c .)" -ne 1 ]; then
+            echo "expected one image digest in dist/digests.txt, got:" >&2
+            cat dist/digests.txt >&2
+            exit 1
+          fi
+          echo "digest=sha256:$digests" >> "$GITHUB_OUTPUT"
+      # the attestation is pushed to the registry as a referrer of the image,
+      # so it doesn't change the image digest
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-checksums: ./dist/digests.txt
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
       - name: Upload .deb packages for the apt job
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
