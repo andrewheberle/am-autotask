@@ -9,6 +9,7 @@ builds:
       - linux
     goarch:
       - amd64
+      - arm64
     env:
       - CGO_ENABLED=0
     flags:
@@ -53,6 +54,9 @@ signs:
 sboms:
   - artifacts: binary
     disable: false
+  - id: package
+    artifacts: package
+    disable: false
 
 archives:
   - ids:
@@ -71,6 +75,38 @@ archives:
     format_overrides:
       - goos: windows
         formats: [zip]
+
+nfpms:
+  - ids:
+      - am-autotask
+    homepage: https://github.com/andrewheberle/am-autotask
+    maintainer: Andrew Heberle <andrew.heberle@gmail.com>
+    vendor: Andrew Heberle
+    description: |-
+      Alertmanager webhook receiver that raises Autotask tickets
+      Receives Alertmanager notifications and raises and maintains Autotask
+      tickets, one ticket per alert group, against the company the alerts
+      belong to.
+    license: MIT
+    section: net
+    formats:
+      - deb
+    contents:
+      - src: systemd/am-autotask.service
+        dst: /usr/lib/systemd/system/am-autotask.service
+      - src: deb/config.example.yaml
+        dst: /usr/share/doc/am-autotask/config.example.yaml
+      # credentials are written here by the admin and read by systemd, so
+      # only root may read them
+      - dst: /etc/am-autotask/credentials
+        type: dir
+        file_info:
+          mode: 0700
+    scripts:
+      postinstall: deb/postinstall.sh
+      preremove: deb/preremove.sh
+      postremove: deb/postremove.sh
+    mtime: "{{ .CommitDate }}"
 
 dockers_v2:
   - images:

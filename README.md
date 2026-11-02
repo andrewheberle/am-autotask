@@ -386,9 +386,70 @@ Alert labels and annotations are never recorded, and Autotask URLs are recorded 
 
 Log lines written while handling a notification carry its `trace_id` and `span_id`. Export failures are logged at `warn`, at most once a minute; tracing never delays or fails a notification.
 
+## Installing
+
+### Debian and Ubuntu
+
+Packages for amd64 and arm64 are attached to each [release](https://github.com/andrewheberle/am-autotask/releases), and published to an APT repository:
+
+```sh
+curl -fsSL https://packages.hebs.net.au/am-autotask/pubkey.gpg | sudo gpg --dearmor -o /usr/share/keyrings/am-autotask.gpg
+echo "deb [signed-by=/usr/share/keyrings/am-autotask.gpg] https://packages.hebs.net.au/am-autotask stable main" | sudo tee /etc/apt/sources.list.d/am-autotask.list
+sudo apt-get update
+sudo apt-get install am-autotask
+```
+
+The package installs the `am-autotask.service` systemd unit, which runs `am-autotask serve --config /etc/am-autotask/config.yaml` as a dynamic user. It is not enabled or started on install, as it needs configuring first:
+
+1. Copy the example configuration and set the IDs for your Autotask instance (see [Configuration](#configuration)). The service cannot read secrets from this file, so leave them out:
+
+   ```sh
+   sudo cp /usr/share/doc/am-autotask/config.example.yaml /etc/am-autotask/config.yaml
+   ```
+
+2. Write each secret to its own file in `/etc/am-autotask/credentials/`, which only root can read. systemd reads these and passes them to the service:
+
+   | File | Setting |
+   | --- | --- |
+   | `webhook-token` | `webhook.token` |
+   | `autotask-username` | `autotask.username` |
+   | `autotask-secret` | `autotask.secret` |
+   | `autotask-integrationcode` | `autotask.integrationcode` |
+
+   ```sh
+   sudo install -m 0600 /dev/null /etc/am-autotask/credentials/webhook-token
+   sudoedit /etc/am-autotask/credentials/webhook-token
+   ```
+
+3. Enable and start the service, and check its logs:
+
+   ```sh
+   sudo systemctl enable --now am-autotask
+   journalctl -u am-autotask
+   ```
+
+Upgrades restart a running service. Settings that the unit does not set can also be changed in a drop-in, made with `sudo systemctl edit am-autotask`. For example, to listen on a port below 1024:
+
+```ini
+[Service]
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+```
+
+With systemd 250 or later, the credentials can be kept encrypted at rest: encrypt each one with `systemd-creds encrypt --name=webhook-token plain.txt /etc/am-autotask/credentials/webhook-token.cred` and replace the unit's `LoadCredential=` lines in a drop-in, clearing them first:
+
+```ini
+[Service]
+LoadCredential=
+LoadCredentialEncrypted=webhook-token:/etc/am-autotask/credentials/webhook-token.cred
+LoadCredentialEncrypted=autotask-username:/etc/am-autotask/credentials/autotask-username.cred
+LoadCredentialEncrypted=autotask-secret:/etc/am-autotask/credentials/autotask-secret.cred
+LoadCredentialEncrypted=autotask-integrationcode:/etc/am-autotask/credentials/autotask-integrationcode.cred
+```
+
 ## Running
 
-The receiver runs as the `serve` subcommand, which takes the flags under [Configuration](#configuration); the `lookup` commands are described under [Finding IDs](#finding-ids), and the `templates` command under [Ticket templates](#errors-and-previews). Before v0.5.0 the receiver ran without a subcommand, so add `serve` before any existing arguments when upgrading. `am-autotask --version` prints the version. Every command and flag is listed in the [command reference](docs/am-autotask.md).
+The receiver runs as the `serve` subcommand, which takes the flags under [Configuration](#configuration); the `lookup` commands are described under [Finding IDs](#finding-ids), and the `templates` command under [Ticket templates](#errors-and-previews). Debian and Ubuntu packages run it as a systemd service; see [Installing](#installing). Before v0.5.0 the receiver ran without a subcommand, so add `serve` before any existing arguments when upgrading. `am-autotask --version` prints the version. Every command and flag is listed in the [command reference](docs/am-autotask.md).
 
 ```sh
 am-autotask serve --config config.yaml

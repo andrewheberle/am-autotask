@@ -1,0 +1,18 @@
+# Example configuration for the am-autotask service. Copy this file to
+# /etc/am-autotask/config.yaml and set the IDs for your Autotask instance.
+#
+# Secrets are not set here: the systemd unit reads them from files in
+# /etc/am-autotask/credentials/ (webhook-token, autotask-username,
+# autotask-secret and autotask-integrationcode).
+#
+# Every setting is described in the README:
+# https://github.com/andrewheberle/am-autotask#configuration
+company:
+  catchall: 175
+ticket:
+  priorities:
+    critical: 4
+    warning: 2
+  defaultpriority: 3
+  queue: 8
+  duein: 4h
