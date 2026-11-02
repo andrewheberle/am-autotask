@@ -2,6 +2,8 @@ module github.com/andrewheberle/am-autotask
 
 go 1.26.0
 
+toolchain go1.27.3
+
 require (
 	github.com/andrewheberle/configger v0.2.2
 	github.com/andrewheberle/simplecommand v0.8.0
