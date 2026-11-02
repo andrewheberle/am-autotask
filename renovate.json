@@ -7,7 +7,7 @@
   ],
   "packageRules": [
     {
-      "description": "Base image updates ship as patch releases; see docs/adr/0001",
+      "description": "Base image updates ship as patch releases; see docs/adr/0009",
       "matchManagers": ["dockerfile"],
       "matchDepTypes": ["final"],
       "semanticCommitType": "fix",
