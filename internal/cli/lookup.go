@@ -22,10 +22,13 @@ type lookupCommand struct {
 func newLookupCommand() *lookupCommand {
 	return &lookupCommand{
 		Command: simplecommand.New("lookup", "Print the Autotask IDs that settings take",
+			simplecommand.WithLong(lookupLong),
 			simplecommand.WithSubCommands(
 				&lookupSubcommand{
 					Command: simplecommand.New("picklists", "Print the IDs of every picklist setting",
 						simplecommand.WithArgs(cobra.NoArgs),
+						simplecommand.WithLong(lookupPicklistsLong),
+						simplecommand.WithExample(lookupPicklistsExample),
 					),
 					allUsage: "include inactive values",
 					run: func(ctx context.Context, w io.Writer, at lookup.Autotask, all bool, _ []string) error {
@@ -35,7 +38,8 @@ func newLookupCommand() *lookupCommand {
 				&lookupSubcommand{
 					Command: simplecommand.New("companies", "Print the IDs of companies whose name contains NAME",
 						simplecommand.WithArgs(cobra.ExactArgs(1)),
-						simplecommand.WithExample("  am-autotask lookup companies --config config.yaml \"R-Group\""),
+						simplecommand.WithLong(lookupCompaniesLong),
+						simplecommand.WithExample(lookupCompaniesExample),
 					),
 					allUsage: "include inactive companies",
 					run: func(ctx context.Context, w io.Writer, at lookup.Autotask, all bool, args []string) error {
@@ -45,6 +49,8 @@ func newLookupCommand() *lookupCommand {
 				&lookupSubcommand{
 					Command: simplecommand.New("worktypes", "Print the IDs of work types, for ticket.worktype",
 						simplecommand.WithArgs(cobra.NoArgs),
+						simplecommand.WithLong(lookupWorktypesLong),
+						simplecommand.WithExample(lookupWorktypesExample),
 					),
 					allUsage: "include inactive work types",
 					run: func(ctx context.Context, w io.Writer, at lookup.Autotask, all bool, _ []string) error {

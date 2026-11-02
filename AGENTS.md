@@ -9,6 +9,7 @@ Autotask based on firing alert groups.
 - `cmd/` - entrypoints for commands; should only include minimal code then call Execute of the relevant package
 - `internal/` - application packages; not importable by other modules
 - `pkg/` - application packages; importable by others
+- `docs/` - the `am-autotask*.md` files are generated from the command definitions; everything else is maintained by hand
 
 ## Build, test, lint
 Run these before considering any change complete:
@@ -34,7 +35,8 @@ Run these before considering any change complete:
 - Adding or changing a metric includes reviewing the example alerting rules in `examples/prometheus/am-autotask.rules.yml`. When the metric shows a problem an operator should act on, add an alert with a test in `am-autotask.rules.test.yml` and a runbook section in `docs/monitoring.md`, then run `promtool test rules examples/prometheus/am-autotask.rules.test.yml`. Either way, add the metric to the metrics table in `docs/monitoring.md`, and review the example dashboard in `examples/grafana/am-autotask.json`; `TestDashboardMatchesMetrics` fails if it uses a metric or label that no longer exists.
 
 ## Documentation
-- Command line flag or behaviour changes must be reflected in `README.md`
+- Command line flag or behaviour changes must be reflected in `README.md` and `docs/`
+- The CLI docs (`docs/am-autotask*.md`) are generated with `go generate ./...` from the flags and the long descriptions and examples in `internal/cli/help.go`; edit those rather than the markdown. A test fails if the committed docs are out of date
 
 ## Testing
 - Table-driven tests with `t.Run` subtests.

@@ -388,7 +388,7 @@ Log lines written while handling a notification carry its `trace_id` and `span_i
 
 ## Running
 
-The receiver runs as the `serve` subcommand, which takes the flags under [Configuration](#configuration); the `lookup` commands are described under [Finding IDs](#finding-ids), and the `templates` command under [Ticket templates](#errors-and-previews). Before v0.5.0 the receiver ran without a subcommand, so add `serve` before any existing arguments when upgrading. `am-autotask --version` prints the version.
+The receiver runs as the `serve` subcommand, which takes the flags under [Configuration](#configuration); the `lookup` commands are described under [Finding IDs](#finding-ids), and the `templates` command under [Ticket templates](#errors-and-previews). Before v0.5.0 the receiver ran without a subcommand, so add `serve` before any existing arguments when upgrading. `am-autotask --version` prints the version. Every command and flag is listed in the [command reference](docs/am-autotask.md).
 
 ```sh
 am-autotask serve --config config.yaml

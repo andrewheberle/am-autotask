@@ -27,7 +27,8 @@ func newTemplatesCommand() *templatesCommand {
 	return &templatesCommand{
 		Command: simplecommand.New("templates", "Preview ticket templates rendered for a sample or given notification",
 			simplecommand.WithArgs(cobra.NoArgs),
-			simplecommand.WithExample("  am-autotask templates --templates templates.tmpl --notification webhook.json"),
+			simplecommand.WithLong(templatesLong),
+			simplecommand.WithExample(templatesExample),
 		),
 	}
 }

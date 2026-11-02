@@ -40,6 +40,8 @@ func newServeCommand(version string) *serveCommand {
 		version: version,
 		Command: simplecommand.New("serve", "Run the webhook receiver",
 			simplecommand.WithArgs(cobra.NoArgs),
+			simplecommand.WithLong(serveLong),
+			simplecommand.WithExample(serveExample),
 		),
 	}
 }

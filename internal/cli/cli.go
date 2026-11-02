@@ -10,6 +10,7 @@ import (
 
 	"github.com/andrewheberle/simplecommand"
 	"github.com/bep/simplecobra"
+	"github.com/spf13/cobra"
 )
 
 // errNoCommand is returned when no subcommand is given, so a container
@@ -17,7 +18,28 @@ import (
 var errNoCommand = errors.New("a subcommand is required")
 
 type rootCommand struct {
+	// cmd is the cobra command built for the root, set by Init
+	cmd *cobra.Command
+
 	*simplecommand.Command
+}
+
+func newRootCommand(version string) *rootCommand {
+	return &rootCommand{
+		Command: simplecommand.New("am-autotask", "Alertmanager webhook receiver that raises Autotask tickets",
+			simplecommand.WithLong(rootLong),
+			simplecommand.WithVersion(version),
+			simplecommand.WithSubCommands(newServeCommand(version), newLookupCommand(), newTemplatesCommand()),
+		),
+	}
+}
+
+func (c *rootCommand) Init(cd *simplecobra.Commandeer) error {
+	if err := c.Command.Init(cd); err != nil {
+		return err
+	}
+	c.cmd = cd.CobraCommand
+	return nil
 }
 
 func (c *rootCommand) Run(ctx context.Context, cd *simplecobra.Commandeer, args []string) error {
@@ -59,15 +81,18 @@ func report(w io.Writer, err error) int {
 	return 1
 }
 
-func execute(ctx context.Context, args []string, version string) error {
-	root := &rootCommand{
-		Command: simplecommand.New("am-autotask", "Alertmanager webhook receiver that raises Autotask tickets",
-			simplecommand.WithVersion(version),
-			simplecommand.WithSubCommands(newServeCommand(version), newLookupCommand(), newTemplatesCommand()),
-		),
+// Command returns the cobra command tree without executing it, for generating
+// documentation.
+func Command() (*cobra.Command, error) {
+	root := newRootCommand("dev")
+	if _, err := simplecobra.New(root); err != nil {
+		return nil, fmt.Errorf("building command tree: %w", err)
 	}
+	return root.cmd, nil
+}
 
-	x, err := simplecobra.New(root)
+func execute(ctx context.Context, args []string, version string) error {
+	x, err := simplecobra.New(newRootCommand(version))
 	if err != nil {
 		return err
 	}
