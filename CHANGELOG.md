@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.12.0](https://github.com/andrewheberle/am-autotask/compare/v0.11.0...v0.12.0) (2026-11-02)
+
+
+### Features
+
+* **container:** use ccgr.dev/chainguard/static image ([#53](https://github.com/andrewheberle/am-autotask/issues/53)) ([f1a07e4](https://github.com/andrewheberle/am-autotask/commit/f1a07e4d8719b8fe855f6b356af1d6ec16beb6f9))
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/prometheus/alertmanager to v0.34.2 ([#51](https://github.com/andrewheberle/am-autotask/issues/51)) ([f41cdb6](https://github.com/andrewheberle/am-autotask/commit/f41cdb62ee32f92f7e52c37a6ab3d915c72fd71f))
+* **deps:** update module go.opentelemetry.io/proto/otlp to v1.11.1 ([#52](https://github.com/andrewheberle/am-autotask/issues/52)) ([b992c3b](https://github.com/andrewheberle/am-autotask/commit/b992c3b23525a9aa78d0fab9fd5473c01eea1168))
+
 ## [0.11.0](https://github.com/andrewheberle/am-autotask/compare/v0.10.0...v0.11.0) (2026-10-24)
 
 
