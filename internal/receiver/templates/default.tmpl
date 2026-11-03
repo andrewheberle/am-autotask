@@ -16,7 +16,10 @@ redefine any of these blocks; the rest keep the definitions here.
 {{if or .CommonAnnotations.summary .CommonAnnotations.description}}
 {{end -}}
 {{with trim .CommonAnnotations.runbook_url}}Runbook: {{.}}
-
+{{end -}}
+{{with trim .CommonAnnotations.dashboard_url}}Dashboard: {{.}}
+{{end -}}
+{{if or (trim .CommonAnnotations.runbook_url) (trim .CommonAnnotations.dashboard_url)}}
 {{end -}}
 Group labels: {{labels .GroupLabels}}
 {{with .AlertmanagerURL}}Alertmanager: {{.}}
@@ -29,6 +32,9 @@ Firing ({{len .Alerts}}):
 {{- end}}
 {{- with trim .Annotations.runbook_url}}{{if ne . (trim $.CommonAnnotations.runbook_url)}}
   Runbook: {{.}}
+{{- end}}{{end}}
+{{- with trim .Annotations.dashboard_url}}{{if ne . (trim $.CommonAnnotations.dashboard_url)}}
+  Dashboard: {{.}}
 {{- end}}{{end}}
   Started: {{time .StartsAt}}
 {{- with .GeneratorURL}}
@@ -50,6 +56,9 @@ Firing ({{len .Alerts}}):
 {{- end}}
 {{- with trim .Annotations.runbook_url}}{{if ne . (trim $.CommonAnnotations.runbook_url)}}
   Runbook: {{.}}
+{{- end}}{{end}}
+{{- with trim .Annotations.dashboard_url}}{{if ne . (trim $.CommonAnnotations.dashboard_url)}}
+  Dashboard: {{.}}
 {{- end}}{{end}}
   Started: {{time .StartsAt}}
 {{- with .GeneratorURL}}

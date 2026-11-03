@@ -1,0 +1,21 @@
+=== ticket title
+Host is down {tenant_id="foo"}
+=== ticket description
+Host is down
+
+Runbook: https://runbooks/hostdown
+
+Group labels: {alertname="HostDown", tenant_id="foo"}
+Alertmanager: http://alertmanager:9093/#/alerts?receiver=autotask
+
+Firing (2):
+- HostDown {instance="web1", severity="critical"}
+  summary of aaaa
+  Dashboard: https://dashboards/web1
+  Started: 2026-10-17 03:50:00 UTC
+  Source: http://prometheus/graph?g0.expr=aaaa
+- HostDown {instance="web2", severity="critical"}
+  summary of bbbb
+  Dashboard: https://dashboards/web2
+  Started: 2026-10-17 03:50:00 UTC
+  Source: http://prometheus/graph?g0.expr=bbbb

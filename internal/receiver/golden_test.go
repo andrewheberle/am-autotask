@@ -47,6 +47,13 @@ func TestBuiltInWordingMatchesGoldenFiles(t *testing.T) {
 			)},
 		},
 		{
+			name: "runbook and dashboard",
+			steps: []receiver.Notification{withSharedRunbook(notification(
+				withDashboard(withRunbook(hostAlert("aaaa", "firing", "web1"), "https://runbooks/hostdown"), "https://dashboards/web1"),
+				withDashboard(withRunbook(hostAlert("bbbb", "firing", "web2"), "https://runbooks/hostdown"), "https://dashboards/web2"),
+			), "https://runbooks/hostdown")},
+		},
+		{
 			name: "no alertname or annotations",
 			steps: []receiver.Notification{func() receiver.Notification {
 				n := notification(alert("aaaa", "firing", map[string]string{"tenant_id": "foo", "job": "node"}))
