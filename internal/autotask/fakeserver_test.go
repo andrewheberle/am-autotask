@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 const (
@@ -82,6 +83,21 @@ func (f *fakeServer) get(name string, id int) entity {
 		}
 	}
 	return nil
+}
+
+// complete simulates a person completing a ticket at a given time.
+func (f *fakeServer) complete(t *testing.T, id int, at time.Time) {
+	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, e := range f.entities["Tickets"] {
+		if e["id"] == id {
+			e["status"] = 5
+			e["completedDate"] = at.UTC().Format(time.RFC3339Nano)
+			return
+		}
+	}
+	t.Fatalf("no ticket %d to complete", id)
 }
 
 func (f *fakeServer) notesFor(ticketID int) []entity {
