@@ -3,9 +3,6 @@ package receiver
 import (
 	"context"
 	"fmt"
-
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // Outcomes of a recurrence, reported to [Observer.Recurrence].
@@ -79,10 +76,7 @@ func (rec *recurrence) linkPrevious() bool {
 // exists, so a retry would find it as current and never link it.
 func (r *Receiver) linkRecurrence(ctx context.Context, n Notification, severity string, rec *recurrence, t NewTicket, created Ticket) {
 	outcome := RecurrenceFailed
-	defer func() {
-		trace.SpanFromContext(ctx).SetAttributes(attribute.String("am_autotask.recurrence", outcome))
-		r.opts.Observer.Recurrence(outcome)
-	}()
+	defer func() { r.report(ctx, eventRecurrence{outcome: outcome}) }()
 
 	switch {
 	case rec.err != nil:
@@ -115,14 +109,7 @@ func (r *Receiver) linkRecurrence(ctx context.Context, n Notification, severity 
 	}
 
 	outcome = RecurrenceRaised
-	w := r.opts.Templates.LinkedNote(problem)
-	if err := r.at.CreateNote(ctx, NewNote{
-		TicketID:    created.ID,
-		Title:       w.Title,
-		Description: w.Description,
-		NoteType:    r.opts.NoteType,
-		Publish:     r.opts.NotePublish,
-	}); err != nil {
+	if err := r.note(ctx, created.ID, r.opts.Templates.LinkedNote(problem)); err != nil {
 		r.opts.Logger.ErrorContext(ctx, "adding problem ticket note failed", "ticket", created.Number, "problem", problem.Number, "error", err)
 	}
 }
@@ -183,14 +170,7 @@ func (r *Receiver) recurrenceFailed(ctx context.Context, rec *recurrence, create
 	r.opts.Logger.ErrorContext(ctx, "linking recurrence to a problem ticket failed",
 		"ticket", created.Number, "previous", rec.previous.Number, "error", rec.err)
 
-	w := r.opts.Templates.RecurrenceFailedNote(RecurrenceFailure{Previous: rec.previous, Problem: rec.problem, Err: rec.err})
-	if err := r.at.CreateNote(ctx, NewNote{
-		TicketID:    created.ID,
-		Title:       w.Title,
-		Description: w.Description,
-		NoteType:    r.opts.NoteType,
-		Publish:     r.opts.NotePublish,
-	}); err != nil {
+	if err := r.note(ctx, created.ID, r.opts.Templates.RecurrenceFailedNote(RecurrenceFailure{Previous: rec.previous, Problem: rec.problem, Err: rec.err})); err != nil {
 		r.opts.Logger.ErrorContext(ctx, "adding recurrence failure note failed", "ticket", created.Number, "error", err)
 	}
 }

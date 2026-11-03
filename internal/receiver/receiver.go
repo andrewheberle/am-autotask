@@ -429,20 +429,10 @@ func (r *Receiver) retireDuplicates(ctx context.Context, externalID string, curr
 	for _, d := range duplicates {
 		r.opts.Logger.WarnContext(ctx, "alert group has more than one open ticket", "current", current.Number, "duplicate", d.Number)
 
-		w := r.opts.Templates.DuplicateNote(current)
-		if err := r.at.CreateNote(ctx, NewNote{
-			TicketID:    d.ID,
-			Title:       w.Title,
-			Description: w.Description,
-			NoteType:    r.opts.NoteType,
-			Publish:     r.opts.NotePublish,
-		}); err != nil {
-			return fmt.Errorf("warning on duplicate ticket %s: %w", d.Number, err)
-		}
-
+		note := r.opts.Templates.DuplicateNote(current)
 		retired := duplicateExternalID(externalID)
-		if err := r.at.UpdateTicket(ctx, d.ID, TicketUpdate{ExternalID: &retired}); err != nil {
-			return fmt.Errorf("retiring duplicate ticket %s: %w", d.Number, err)
+		if err := r.commit(ctx, d, "duplicate ticket", change{note: &note, update: TicketUpdate{ExternalID: &retired}}); err != nil {
+			return err
 		}
 	}
 
@@ -450,13 +440,26 @@ func (r *Receiver) retireDuplicates(ctx context.Context, externalID string, curr
 }
 
 // update records the alerts that fired or resolved since the ticket last
-// changed. The note is written before the recorded alerts so that a failure
-// in between repeats the note on retry rather than losing it.
+// changed, reporting whether anything was written.
 func (r *Receiver) update(ctx context.Context, n Notification, t Ticket) (changed bool, err error) {
+	c := r.plan(ctx, n, t)
+	if c.empty() {
+		return false, nil
+	}
+	if err := r.commit(ctx, t, "ticket", c); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// plan works out how a notification changes its alert group's current
+// ticket: a change note on the alerts that fired or resolved, with the
+// recorded alerts, and the priority and status changes they bring.
+func (r *Receiver) plan(ctx context.Context, n Notification, t Ticket) change {
 	groupResolved := n.Status == statusResolved
 	fired, resolved, recorded, ok := diff(t.RecordedAlerts, n.Alerts, groupResolved)
 	if !ok {
-		return false, nil
+		return change{}
 	}
 
 	if groupResolved {
@@ -464,22 +467,21 @@ func (r *Receiver) update(ctx context.Context, n Notification, t Ticket) (change
 		// resolved along with the rest of the group
 		clear(recorded)
 	}
-	noted := len(fired) > 0 || len(resolved) > 0 || (groupResolved && t.RecordedAlerts != "")
-	reopened := r.reopens(t, groupResolved, fired)
 
-	// priority only follows alerts firing or resolving, not alerts that are
-	// silenced or inhibited and so missing from the notification
-	var pc priorityChange
-	if !groupResolved && (len(fired) > 0 || len(resolved) > 0) {
-		pc = r.reprioritise(ctx, n, t)
-	}
-
-	var update TicketUpdate
-	if noted {
+	var c change
+	if len(fired) > 0 || len(resolved) > 0 || (groupResolved && t.RecordedAlerts != "") {
 		value, overflow := encodeRecorded(keys(recorded))
+		reopened := r.reopens(t, groupResolved, fired)
+
+		// priority only follows alerts firing or resolving, not alerts that
+		// are silenced or inhibited and so missing from the notification
+		var pc priorityChange
+		if !groupResolved {
+			pc = r.reprioritise(ctx, n, t)
+		}
 
 		severity, _ := r.severity(n)
-		w := r.word(ctx, r.opts.Templates.ChangeNote(NoteInput{
+		note := r.word(ctx, r.opts.Templates.ChangeNote(NoteInput{
 			Notification: n,
 			Severity:     severity,
 			Fired:        fired,
@@ -489,44 +491,24 @@ func (r *Receiver) update(ctx context.Context, n Notification, t Ticket) (change
 			Overflow:     overflow,
 			Priority:     pc.notice,
 		}))
-		if err := r.at.CreateNote(ctx, NewNote{
-			TicketID:    t.ID,
-			Title:       w.Title,
-			Description: w.Description,
-			NoteType:    r.opts.NoteType,
-			Publish:     r.opts.NotePublish,
-		}); err != nil {
-			return false, fmt.Errorf("adding note to ticket %s: %w", t.Number, err)
-		}
-
-		update.RecordedAlerts = &value
-		update.Priority = pc.priority
-		update.AppliedPriority = pc.applied
+		c.note = &note
+		c.update.RecordedAlerts = &value
+		pc.contribute(&c, t)
 		if reopened {
-			update.Status = &r.opts.ReopenStatus
+			// set with the recorded alerts, so a failed update reopens on
+			// retry
+			c.update.Status = &r.opts.ReopenStatus
+			c.events = append(c.events, eventReopened{ticket: t})
 		}
 	}
 
 	// also applied when a previous attempt noted the resolution but failed
 	// to change the status
 	if groupResolved && r.opts.ResolvedStatus != 0 && t.Status != r.opts.ResolvedStatus {
-		update.Status = &r.opts.ResolvedStatus
+		c.update.Status = &r.opts.ResolvedStatus
 	}
 
-	if update.RecordedAlerts == nil && update.Status == nil {
-		return false, nil
-	}
-	if err := r.at.UpdateTicket(ctx, t.ID, update); err != nil {
-		return false, fmt.Errorf("updating ticket %s: %w", t.Number, err)
-	}
-	r.observePriority(ctx, t, pc)
-	if reopened {
-		trace.SpanFromContext(ctx).SetAttributes(attribute.Bool("am_autotask.reopened", true))
-		r.opts.Logger.InfoContext(ctx, "reopened ticket awaiting closure", "ticket", t.Number)
-		r.opts.Observer.Reopened()
-	}
-
-	return true, nil
+	return c
 }
 
 // reopens reports whether a notification reopens a ticket awaiting closure:
