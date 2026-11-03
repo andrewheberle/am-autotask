@@ -24,6 +24,10 @@ _Avoid_: Level, urgency, priority (for alerts)
 The documentation an alert links to, telling whoever handles its ticket how to respond.
 _Avoid_: Playbook, SOP, KB article
 
+**Dashboard**:
+The graphs an alert links to, showing the condition it reports over time, so whoever handles its ticket can see when it started and how far it reaches.
+_Avoid_: Panel, graph, Grafana link
+
 ## Autotask side
 
 **Company**:
