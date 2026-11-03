@@ -577,34 +577,13 @@ func (r *Receiver) create(ctx context.Context, n Notification, externalID string
 		t.DueDateTime = &due
 	}
 
-	rec := r.recurrence(ctx, previous)
-	var created Ticket
-	if rec.follows() {
-		linked := t
-		linked.ProblemTicketID = rec.problem.ID
-		in.Problem = rec.problem
-		// the same templates and data as the unlinked wording, whose
-		// fallbacks have already been reported
-		linked.Description = r.opts.Templates.Ticket(in).Description
-		created, err = r.at.CreateTicket(ctx, linked)
-		if errors.Is(err, ErrPermanent) {
-			// Autotask rejected the link, perhaps because the problem ticket
-			// holds as many incidents as it allows; the ticket matters more
-			rec.err = fmt.Errorf("linking to problem ticket %s: %w", rec.problem.Number, err)
-			created, err = r.at.CreateTicket(ctx, t)
-		}
-	} else {
-		created, err = r.at.CreateTicket(ctx, t)
-	}
+	created, err := r.raiseTicket(ctx, in, t)
 	if err != nil {
 		return nil, fmt.Errorf("creating ticket: %w", err)
 	}
 
 	if catchAll != "" {
 		r.opts.Observer.CatchAll(catchAll)
-	}
-	if rec != nil {
-		r.linkRecurrence(ctx, n, severity, rec, t, created)
 	}
 
 	return &created, nil
