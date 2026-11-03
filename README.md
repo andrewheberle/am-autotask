@@ -1,7 +1,7 @@
 # am-autotask
 
 [![tag](https://img.shields.io/github/v/tag/andrewheberle/am-autotask)](https://github.com/andrewheberle/am-autotask/-/tags)
-[![LICENSE](https://img.shields.io/badge/license-MIT-blue)](https://github.com/andrewheberle/am-autotask/-/blob/main/LICENSE)
+[![GitHub License](https://img.shields.io/github/license/andrewheberle/am-autotask)](https://github.com/andrewheberle/am-autotask/-/blob/main/LICENSE)
 [![codecov](https://codecov.io/gh/andrewheberle/am-autotask/graph/badge.svg?token=K1fgnzaogT)](https://codecov.io/gh/andrewheberle/am-autotask)
 
 This is a [webhook receiver](https://prometheus.io/docs/alerting/configuration/#webhook_config) for [Alertmanager](https://github.com/prometheus/alertmanager) that creates tickets in [Autotask](https://www.datto.com/products/autotask-psa/).
