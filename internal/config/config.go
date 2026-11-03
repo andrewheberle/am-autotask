@@ -140,25 +140,43 @@ func AddFlags(f *pflag.FlagSet) {
 	f.String("leaderelection.address", "", "host:port other replicas forward notifications to while this one leads, such as the pod IP and listen port (required with leaderelection.enabled)")
 }
 
-// AddTemplatesFlags adds the flags for the configuration file and the
-// templates file to f, for previewing ticket templates.
+// AddTemplatesFlags adds the flags for the configuration file, the
+// templates file and finding an alert group's severity to f, for previewing
+// ticket templates.
 func AddTemplatesFlags(f *pflag.FlagSet) {
 	f.String("config", "", "path to YAML configuration file")
 	f.String("templates", "", "path to a file of ticket templates overriding the built-in wording (optional)")
+	f.String("ticket.severitylabel", "severity", "label whose value is the alert group's severity")
+	f.StringSlice("ticket.severityorder", nil, "severities, most serious first; when set, an alert group's severity is its highest firing severity (optional)")
 }
 
-// TemplatesFromFlags loads only the templates file path from f, which holds
-// the flags added by [AddTemplatesFlags] already parsed, in the same way as
-// [FromFlags], and checks the TZ environment variable.
-func TemplatesFromFlags(f *pflag.FlagSet) (string, error) {
+// Preview is what previewing ticket templates needs from the configuration.
+type Preview struct {
+	// Templates is the templates file path, or empty for the built-in
+	// templates.
+	Templates     string
+	SeverityLabel string
+	SeverityOrder []string
+}
+
+// TemplatesFromFlags loads only what previewing ticket templates needs from
+// f, which holds the flags added by [AddTemplatesFlags] already parsed, in
+// the same way as [FromFlags], and checks the TZ environment variable. The
+// severity settings are not checked against ticket.priorities, which a
+// preview does not need.
+func TemplatesFromFlags(f *pflag.FlagSet) (Preview, error) {
 	k, err := configger.LoadConfig(f, configger.WithEnvPrefix(EnvPrefix))
 	if err != nil {
-		return "", err
+		return Preview{}, err
 	}
 	if err := CheckTZ(os.Getenv("TZ")); err != nil {
-		return "", err
+		return Preview{}, err
 	}
-	return k.String("templates"), nil
+	return Preview{
+		Templates:     k.String("templates"),
+		SeverityLabel: k.String("ticket.severitylabel"),
+		SeverityOrder: k.Strings("ticket.severityorder"),
+	}, nil
 }
 
 // FromFlags loads the configuration from f, which holds the flags added by

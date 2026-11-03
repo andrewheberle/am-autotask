@@ -127,10 +127,11 @@ func (r *Receiver) moveFrom(ctx context.Context, n Notification, current Ticket,
 	value, _ := encodeRecorded(keys(recorded))
 	emptied := value == ""
 
+	w := r.opts.Templates.MovedNote(MovedInput{Notification: n, Moved: moved, Current: current, Emptied: emptied})
 	if err := r.at.CreateNote(ctx, NewNote{
 		TicketID:    t.ID,
-		Title:       truncate(movedTitle(len(moved), current, emptied), maxNoteTitle),
-		Description: movedDescription(n, moved, current, emptied, r.opts.Templates.loc),
+		Title:       w.Title,
+		Description: w.Description,
 		NoteType:    r.opts.NoteType,
 		Publish:     r.opts.NotePublish,
 	}); err != nil {

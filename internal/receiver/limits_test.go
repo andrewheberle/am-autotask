@@ -1,9 +1,11 @@
 package receiver_test
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/andrewheberle/am-autotask/internal/receiver"
@@ -109,5 +111,27 @@ func TestGroupTooLargeToRecordFromTheStart(t *testing.T) {
 	}
 	if got := len(at.notesFor(ticket.ID)); got != 0 {
 		t.Errorf("expected no notes while too large, got %d", got)
+	}
+}
+
+func TestOverlongSystemNoteIsTruncatedVisibly(t *testing.T) {
+	at := newFakeAutotask()
+	r := newReceiver(t, at, recurrenceOptions(nil))
+	addPrevious(at, receiver.TicketTypeIncident, addProblem(at, false), time.Hour)
+	// the reason linking failed is Autotask's own error text, of any length
+	at.failNext("Ticket", errors.New(strings.Repeat("autotask says no; ", 2000)))
+
+	handle(t, r, notification(hostAlert("aaaa", "firing", "web1")))
+
+	note, ok := noteTitled(at, currentTicket(t, at).ID, "Not linked to a problem ticket")
+	if !ok {
+		t.Fatalf("no note explaining the link failed: %+v", at.notesFor(currentTicket(t, at).ID))
+	}
+	if got := utf8.RuneCountInString(note.Description); got > 32000 {
+		t.Errorf("note description is %d characters, limit 32000", got)
+	}
+	if !strings.HasSuffix(note.Description, "… (truncated)") {
+		t.Errorf("truncated note description should end with a visible marker, ends %q",
+			note.Description[len(note.Description)-40:])
 	}
 }

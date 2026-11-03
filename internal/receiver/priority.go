@@ -18,19 +18,28 @@ const (
 const appliedOverride = "override"
 
 // severity returns an alert group's severity and the priority it maps to.
-// With a severity order this is the highest severity among the firing
-// alerts, otherwise the common severity label.
-func (r *Receiver) severity(n Notification, firing []Alert) (string, int) {
-	if len(r.opts.SeverityOrder) == 0 {
-		s := n.CommonLabels[r.opts.SeverityLabel]
-		return s, r.priorityOf(s)
+func (r *Receiver) severity(n Notification) (string, int) {
+	s := GroupSeverity(n, r.opts.SeverityLabel, r.opts.SeverityOrder)
+	return s, r.priorityOf(s)
+}
+
+// GroupSeverity returns an alert group's severity, given by the label named
+// label, default "severity". With order, ranking severities most serious
+// first, this is the highest severity among the firing alerts, otherwise
+// the common label.
+func GroupSeverity(n Notification, label string, order []string) string {
+	if label == "" {
+		label = "severity"
+	}
+	if len(order) == 0 {
+		return n.CommonLabels[label]
 	}
 
 	var highest, unranked string
-	rank := len(r.opts.SeverityOrder)
-	for _, a := range firing {
-		s := a.Labels[r.opts.SeverityLabel]
-		switch j := slices.Index(r.opts.SeverityOrder, s); {
+	rank := len(order)
+	for _, a := range alertsWithStatus(n.Alerts, statusFiring) {
+		s := a.Labels[label]
+		switch j := slices.Index(order, s); {
 		case j >= 0 && j < rank:
 			highest, rank = s, j
 		case j < 0 && unranked == "":
@@ -41,7 +50,7 @@ func (r *Receiver) severity(n Notification, firing []Alert) (string, int) {
 		// every severity ranks lowest, so name one of them
 		highest = unranked
 	}
-	return highest, r.priorityOf(highest)
+	return highest
 }
 
 func (r *Receiver) priorityOf(severity string) int {
@@ -62,11 +71,9 @@ func (r *Receiver) priorityRank(p int) int {
 	return len(r.opts.SeverityOrder)
 }
 
-func (r *Receiver) priorityLabel(p int) string {
-	if l, ok := r.opts.PriorityLabels[p]; ok && l != "" {
-		return l + " (" + strconv.Itoa(p) + ")"
-	}
-	return strconv.Itoa(p)
+// priority returns a priority with its label.
+func (r *Receiver) priority(p int) Priority {
+	return Priority{ID: p, Label: r.opts.PriorityLabels[p]}
 }
 
 // priorityChange is how a ticket's priority follows its alert group's
@@ -74,12 +81,8 @@ func (r *Receiver) priorityLabel(p int) string {
 type priorityChange struct {
 	priority *int
 	applied  *string
-	// note is a line for the ticket note, empty when nothing changes
-	note string
-	// direction is set when the priority changes
-	direction string
-	// override is set when a priority override is first detected
-	override bool
+	// notice is for the change note, nil when nothing changes
+	notice *PriorityNotice
 }
 
 // reprioritise works out how a ticket's priority follows its alert group's
@@ -100,13 +103,12 @@ func (r *Receiver) reprioritise(ctx context.Context, n Notification, t Ticket) p
 	if t.Priority != applied {
 		marker := appliedOverride
 		return priorityChange{
-			applied:  &marker,
-			note:     "Priority was changed manually to " + r.priorityLabel(t.Priority) + ", so it will no longer follow alert severity.",
-			override: true,
+			applied: &marker,
+			notice:  &PriorityNotice{Override: true, To: r.priority(t.Priority)},
 		}
 	}
 
-	severity, want := r.severity(n, alertsWithStatus(n.Alerts, statusFiring))
+	severity, want := r.severity(n)
 	if want == applied {
 		return priorityChange{}
 	}
@@ -115,28 +117,30 @@ func (r *Receiver) reprioritise(ctx context.Context, n Notification, t Ticket) p
 	if r.priorityRank(want) < r.priorityRank(applied) {
 		direction = PriorityRaised
 	}
-	if severity == "" {
-		severity = "unset"
-	}
 	value := strconv.Itoa(want)
 	return priorityChange{
-		priority:  &want,
-		applied:   &value,
-		note:      "Priority " + direction + " from " + r.priorityLabel(applied) + " to " + r.priorityLabel(want) + ": the highest firing severity is now " + severity + ".",
-		direction: direction,
+		priority: &want,
+		applied:  &value,
+		notice: &PriorityNotice{
+			Direction: direction,
+			From:      r.priority(applied),
+			To:        r.priority(want),
+			Severity:  severity,
+		},
 	}
 }
 
 // observePriority reports a priority change once it has been made.
 func (r *Receiver) observePriority(ctx context.Context, t Ticket, pc priorityChange) {
 	switch {
-	case pc.override:
+	case pc.notice == nil:
+	case pc.notice.Override:
 		r.opts.Logger.InfoContext(ctx, "ticket priority overridden; no longer following severity",
 			"ticket", t.Number, "priority", t.Priority)
 		r.opts.Observer.PriorityOverridden()
-	case pc.direction != "":
+	default:
 		r.opts.Logger.InfoContext(ctx, "ticket priority follows severity",
-			"ticket", t.Number, "from", t.Priority, "to", *pc.priority, "direction", pc.direction)
-		r.opts.Observer.PriorityChanged(pc.direction)
+			"ticket", t.Number, "from", t.Priority, "to", *pc.priority, "direction", pc.notice.Direction)
+		r.opts.Observer.PriorityChanged(pc.notice.Direction)
 	}
 }
