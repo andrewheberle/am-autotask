@@ -130,17 +130,15 @@ func (r *Receiver) reprioritise(ctx context.Context, n Notification, t Ticket) p
 	}
 }
 
-// observePriority reports a priority change once it has been made.
-func (r *Receiver) observePriority(ctx context.Context, t Ticket, pc priorityChange) {
+// contribute adds the priority change to c, the change to ticket t.
+func (pc priorityChange) contribute(c *change, t Ticket) {
+	c.update.Priority = pc.priority
+	c.update.AppliedPriority = pc.applied
 	switch {
 	case pc.notice == nil:
 	case pc.notice.Override:
-		r.opts.Logger.InfoContext(ctx, "ticket priority overridden; no longer following severity",
-			"ticket", t.Number, "priority", t.Priority)
-		r.opts.Observer.PriorityOverridden()
+		c.events = append(c.events, eventPriorityOverridden{ticket: t})
 	default:
-		r.opts.Logger.InfoContext(ctx, "ticket priority follows severity",
-			"ticket", t.Number, "from", t.Priority, "to", *pc.priority, "direction", pc.notice.Direction)
-		r.opts.Observer.PriorityChanged(pc.notice.Direction)
+		c.events = append(c.events, eventPriorityChanged{ticket: t, to: *pc.priority, direction: pc.notice.Direction})
 	}
 }

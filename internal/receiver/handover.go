@@ -127,30 +127,17 @@ func (r *Receiver) moveFrom(ctx context.Context, n Notification, current Ticket,
 	value, _ := encodeRecorded(keys(recorded))
 	emptied := value == ""
 
-	w := r.opts.Templates.MovedNote(MovedInput{Notification: n, Moved: moved, Current: current, Emptied: emptied})
-	if err := r.at.CreateNote(ctx, NewNote{
-		TicketID:    t.ID,
-		Title:       w.Title,
-		Description: w.Description,
-		NoteType:    r.opts.NoteType,
-		Publish:     r.opts.NotePublish,
-	}); err != nil {
-		return 0, fmt.Errorf("adding note to orphaned ticket %s: %w", t.Number, err)
+	note := r.opts.Templates.MovedNote(MovedInput{Notification: n, Moved: moved, Current: current, Emptied: emptied})
+	c := change{
+		note:   &note,
+		update: TicketUpdate{RecordedAlerts: &value},
+		events: []event{eventAlertsMoved{orphan: t, current: current, moved: len(moved), emptied: emptied}},
 	}
-
-	update := TicketUpdate{RecordedAlerts: &value}
 	if emptied && r.opts.ResolvedStatus != 0 {
-		update.Status = &r.opts.ResolvedStatus
+		c.update.Status = &r.opts.ResolvedStatus
 	}
-	if err := r.at.UpdateTicket(ctx, t.ID, update); err != nil {
-		return 0, fmt.Errorf("updating orphaned ticket %s: %w", t.Number, err)
-	}
-
-	r.opts.Logger.InfoContext(ctx, "moved alerts off orphaned ticket",
-		"orphan", t.Number, "to", current.Number, "alerts", len(moved), "emptied", emptied)
-	r.opts.Observer.AlertsMoved(len(moved))
-	if emptied {
-		r.opts.Observer.OrphanHandedOver()
+	if err := r.commit(ctx, t, "orphaned ticket", c); err != nil {
+		return 0, err
 	}
 
 	return len(moved), nil
