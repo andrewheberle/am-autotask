@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/andrewheberle/am-autotask/compare/v0.13.0...v0.14.0) (2026-11-03)
+
+
+### Features
+
+* **templates:** show dashboard_url annotations in tickets and notes ([#65](https://github.com/andrewheberle/am-autotask/issues/65)) ([2c3a95d](https://github.com/andrewheberle/am-autotask/commit/2c3a95d4acadc76cb760191e86dce6c610f6fd66))
+
 ## [0.13.0](https://github.com/andrewheberle/am-autotask/compare/v0.12.0...v0.13.0) (2026-11-02)
 
 
