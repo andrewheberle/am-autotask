@@ -44,11 +44,11 @@ func (c *templatesCommand) Init(cd *simplecobra.Commandeer) error {
 }
 
 func (c *templatesCommand) Run(ctx context.Context, cd *simplecobra.Commandeer, args []string) error {
-	path, err := config.TemplatesFromFlags(cd.CobraCommand.Flags())
+	cfg, err := config.TemplatesFromFlags(cd.CobraCommand.Flags())
 	if err != nil {
 		return err
 	}
-	tmpl, err := receiver.ParseTemplates(path, time.Local)
+	tmpl, err := receiver.ParseTemplates(cfg.Templates, time.Local)
 	if err != nil {
 		return err
 	}
@@ -61,7 +61,7 @@ func (c *templatesCommand) Run(ctx context.Context, cd *simplecobra.Commandeer, 
 		return err
 	}
 
-	return previewTemplates(cd.CobraCommand.OutOrStdout(), tmpl, n)
+	return previewTemplates(cd.CobraCommand.OutOrStdout(), tmpl, n, cfg)
 }
 
 func readNotification(path string) (receiver.Notification, error) {
@@ -77,8 +77,8 @@ func readNotification(path string) (receiver.Notification, error) {
 }
 
 // previewTemplates writes each rendered template under a heading.
-func previewTemplates(w io.Writer, tmpl *receiver.Templates, n receiver.Notification) error {
-	out, err := tmpl.Preview(n)
+func previewTemplates(w io.Writer, tmpl *receiver.Templates, n receiver.Notification, cfg config.Preview) error {
+	out, err := tmpl.Preview(n, cfg.SeverityLabel, cfg.SeverityOrder)
 	if err != nil {
 		return err
 	}

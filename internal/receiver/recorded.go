@@ -13,9 +13,6 @@ const maxRecordedAlerts = 8000
 // fit; it cannot be mistaken for a fingerprint as those are hexadecimal.
 const recordedOverflow = "overflow"
 
-const overflowNotice = "This alert group has too many alerts to track individually; " +
-	"further alerts firing or resolving will not be noted until the whole group resolves."
-
 // encodeRecorded renders fingerprints for the recorded alerts UDF: sorted,
 // de-duplicated and comma separated. It reports overflow, and returns
 // [recordedOverflow], when they do not fit.

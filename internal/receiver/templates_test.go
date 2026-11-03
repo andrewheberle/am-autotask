@@ -202,7 +202,7 @@ func TestPreviewRendersEveryTemplate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := tmpl.Preview(n)
+	got, err := tmpl.Preview(n, "", nil)
 	if err != nil {
 		t.Fatalf("Preview: %v", err)
 	}

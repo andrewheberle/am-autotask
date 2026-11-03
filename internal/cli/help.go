@@ -52,9 +52,12 @@ notification, or for an Alertmanager webhook payload saved as JSON, without
 raising tickets.
 
 The payload's firing alerts are treated as a new ticket, all its alerts as a
-change note, and its ticket as a recurrence raising a problem ticket. System
-notices are not shown. The templates path is also read from --config and
-AM_AUTOTASK_TEMPLATES.`
+change note, and its ticket as a recurrence raising a problem ticket. Output
+is tidied and cut to Autotask's limits as on real tickets, and .Severity is
+found as serve finds it, from ticket.severitylabel and ticket.severityorder.
+System notices are not shown. The templates path and the severity settings
+are also read from --config and AM_AUTOTASK_* environment variables, so
+passing serve's configuration file previews what serve would write.`
 
 	templatesExample = `  am-autotask templates --templates templates.tmpl --notification webhook.json`
 )

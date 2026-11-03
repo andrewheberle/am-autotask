@@ -294,7 +294,7 @@ Some companies' company selectors do not parse, so those companies are skipped a
 A block in the templates file failed on a real notification, although it passed against the sample notification at startup. The ticket or note was still written, using the built-in wording for that block, so nothing was lost, but it doesn't look the way the templates file intends.
 
 - Search am-autotask's logs for `ticket template failed`; each entry names the template and the error, such as an index past the end of `.Alerts` or a function given the wrong type.
-- Save the notification that failed (Alertmanager's webhook payload) as JSON and reproduce the error with `am-autotask templates --templates <file> --notification <payload>`.
+- Save the notification that failed (Alertmanager's webhook payload) as JSON and reproduce the error with `am-autotask templates --config <serve's configuration file> --notification <payload>`, so the templates file and `.Severity` are the ones `serve` uses.
 - Fix the block so it handles that notification, for example by checking a list's length before indexing it, and restart am-autotask.
 
 ### AmAutotaskRecurrenceLinkFailed

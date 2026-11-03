@@ -99,9 +99,11 @@ type AlertData struct {
 	Fingerprint  string
 }
 
-// Templates renders ticket titles and descriptions and change note titles
-// and descriptions. Blocks a templates file does not define keep their
-// built-in definitions.
+// Templates words every ticket and ticket note the receiver writes: ticket
+// titles and descriptions, change notes and problem tickets from ticket
+// templates, with system notices ahead of them (ADR-0005), and system notes
+// in fixed wording, all cut to Autotask's field limits. Blocks a templates
+// file does not define keep their built-in definitions.
 type Templates struct {
 	// loc is the time zone times are shown in
 	loc     *time.Location
@@ -154,7 +156,7 @@ func ParseTemplates(path string, loc *time.Location) (*Templates, error) {
 	if err != nil {
 		return nil, err
 	}
-	data := previewData(n, custom)
+	data := checkData(n, custom)
 	var errs []error
 	for _, name := range TemplateNames {
 		if _, err := execute(custom, name, data.forTemplate(name)); err != nil {
@@ -265,6 +267,30 @@ func group(n Notification, severity string) Group {
 	}
 }
 
+func ticketData(n Notification, severity string) TicketData {
+	return TicketData{Group: group(n, severity), Alerts: alertData(alertsWithStatus(n.Alerts, statusFiring))}
+}
+
+func noteData(in NoteInput) NoteData {
+	return NoteData{
+		Group:         group(in.Notification, in.Severity),
+		Fired:         alertData(in.Fired),
+		Resolved:      alertData(in.Resolved),
+		GroupResolved: in.Notification.Status == statusResolved,
+		Reopened:      in.Reopened,
+		TicketNumber:  in.TicketNumber,
+	}
+}
+
+func problemData(in ProblemInput) ProblemData {
+	return ProblemData{
+		TicketData:           ticketData(in.Notification, in.Severity),
+		TicketTitle:          in.TicketTitle,
+		TicketNumber:         in.TicketNumber,
+		PreviousTicketNumber: in.PreviousTicketNumber,
+	}
+}
+
 func alertData(alerts []Alert) []AlertData {
 	out := make([]AlertData, 0, len(alerts))
 	for _, a := range alerts {
@@ -314,52 +340,75 @@ func (d templateData) forTemplate(name string) any {
 	return d.ticket
 }
 
-// previewData is the data templates are executed with to preview a
-// notification: as if it raised a ticket from its firing alerts, as if its
-// firing and resolved alerts were all changes for a change note, and as if
-// its ticket, titled by tmpl, were a recurrence raising a problem ticket.
-func previewData(n Notification, tmpl *template.Template) templateData {
-	firing := alertData(alertsWithStatus(n.Alerts, statusFiring))
-	g := group(n, n.CommonLabels["severity"])
-	ticket := TicketData{Group: g, Alerts: firing}
-	// a failing title is reported when the title template itself is run
-	title, _ := execute(tmpl, TemplateTicketTitle, ticket)
-	return templateData{
-		ticket: ticket,
-		note: NoteData{
-			Group:         g,
-			Fired:         firing,
-			Resolved:      alertData(alertsWithStatus(n.Alerts, statusResolved)),
-			GroupResolved: n.Status == statusResolved,
-			TicketNumber:  "T20261019.0001",
+// Ticket numbers a preview, and the check of a templates file, show.
+const (
+	sampleTicketNumber   = "T20261019.0002"
+	samplePreviousNumber = "T20261019.0001"
+)
+
+// sampleInputs are what a notification is worded from to check or preview
+// it: as if it raised a ticket from its firing alerts, as if its firing and
+// resolved alerts were all changes for a change note, and as if the new
+// ticket were a recurrence raising a problem ticket, whose input still needs
+// the new ticket's title. They carry no system notice facts, as those
+// depend on Autotask.
+func sampleInputs(n Notification, severity string) (TicketInput, NoteInput, ProblemInput) {
+	return TicketInput{Notification: n, Severity: severity},
+		NoteInput{
+			Notification: n,
+			Severity:     severity,
+			Fired:        alertsWithStatus(n.Alerts, statusFiring),
+			Resolved:     alertsWithStatus(n.Alerts, statusResolved),
+			TicketNumber: samplePreviousNumber,
 		},
-		problem: ProblemData{
-			TicketData:           ticket,
-			TicketTitle:          tidy(TemplateTicketTitle, title),
-			TicketNumber:         "T20261019.0002",
-			PreviousTicketNumber: "T20261019.0001",
-		},
-	}
+		ProblemInput{
+			Notification:         n,
+			Severity:             severity,
+			TicketNumber:         sampleTicketNumber,
+			PreviousTicketNumber: samplePreviousNumber,
+		}
 }
 
-// Preview renders every ticket template for n as the receiver would, but
-// without system notices, returning the first error rather than falling
-// back to the built-in templates.
-func (t *Templates) Preview(n Notification) (map[string]string, error) {
-	tmpl := t.builtin
-	if t.custom != nil {
-		tmpl = t.custom
-	}
-	data := previewData(n, tmpl)
-	out := map[string]string{}
-	for _, name := range TemplateNames {
-		s, err := execute(tmpl, name, data.forTemplate(name))
-		if err != nil {
-			return nil, err
+// checkData is the data every block of tmpl is checked against for the
+// sample notification n.
+func checkData(n Notification, tmpl *template.Template) templateData {
+	severity := GroupSeverity(n, "", nil)
+	ticket, note, problem := sampleInputs(n, severity)
+	td := ticketData(ticket.Notification, ticket.Severity)
+	// a failing title is reported when the title template itself is run
+	title, _ := execute(tmpl, TemplateTicketTitle, td)
+	problem.TicketTitle = tidy(TemplateTicketTitle, title)
+	return templateData{ticket: td, note: noteData(note), problem: problemData(problem)}
+}
+
+// Preview words every ticket template for n as the receiver would, finding
+// the alert group's severity with severityLabel and severityOrder as the
+// receiver does, but without system notices, which depend on Autotask. It
+// returns the first failing template's error rather than falling back to
+// the built-in templates.
+func (t *Templates) Preview(n Notification, severityLabel string, severityOrder []string) (map[string]string, error) {
+	severity := GroupSeverity(n, severityLabel, severityOrder)
+	tin, nin, pin := sampleInputs(n, severity)
+	ticket := t.Ticket(tin)
+	note := t.ChangeNote(nin)
+	pin.TicketTitle = ticket.Title
+	problem := t.ProblemTicket(pin)
+
+	for _, w := range []Wording{ticket, note, problem} {
+		for _, f := range w.Fallbacks {
+			if f.Err != nil {
+				return nil, f.Err
+			}
 		}
-		out[name] = tidy(name, s)
 	}
-	return out, nil
+	return map[string]string{
+		TemplateTicketTitle:        ticket.Title,
+		TemplateTicketDescription:  ticket.Description,
+		TemplateNoteTitle:          note.Title,
+		TemplateNoteDescription:    note.Description,
+		TemplateProblemTitle:       problem.Title,
+		TemplateProblemDescription: problem.Description,
+	}, nil
 }
 
 // tidy cleans up rendered output: a title becomes a single line, and a

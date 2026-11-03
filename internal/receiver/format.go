@@ -1,7 +1,6 @@
 package receiver
 
 import (
-	"context"
 	"fmt"
 	"net/url"
 	"slices"
@@ -48,106 +47,12 @@ func formatLabels(labels map[string]string, exclude map[string]string) string {
 	return "{" + strings.Join(pairs, ", ") + "}"
 }
 
-// render executes a ticket template and tidies the result. A failing
-// template from the templates file falls back to the built-in one, and so
-// does a title that renders empty.
-func (r *Receiver) render(ctx context.Context, name string, data any) string {
-	out, err := r.opts.Templates.render(name, data)
-	if err != nil {
-		r.opts.Logger.ErrorContext(ctx, "ticket template failed; using the built-in template", "template", name, "error", err)
-		r.opts.Observer.TemplateFailed(name)
-	}
-	out = tidy(name, out)
-	if out == "" && strings.HasSuffix(name, ".title") {
-		r.opts.Logger.WarnContext(ctx, "ticket template rendered an empty title; using the built-in template", "template", name)
-		builtin, _ := r.opts.Templates.renderBuiltin(name, data)
-		out = tidy(name, builtin)
-	}
-	return out
-}
-
-// withNotices puts system notices ahead of a rendered description, where a
-// template cannot leave them out (ADR-0005).
-func withNotices(notices []string, body string) string {
-	if len(notices) == 0 {
-		return body
-	}
-	return strings.Join(notices, "\n\n") + "\n\n" + body
-}
-
-// ticketNotices are the system notices for a new ticket.
-func ticketNotices(ambiguous []int64, previous *Ticket, continues []Ticket, overflow bool) []string {
-	var notices []string
-	if len(ambiguous) > 0 {
-		notices = append(notices, fmt.Sprintf("NOTE: this alert group matched the company selectors of more than one company (IDs %s) so it was raised against the catch-all company. Correct the company selectors so only one company matches.",
-			joinIDs(ambiguous)))
-	}
-	if previous != nil {
-		notices = append(notices, "Previous ticket for this alert group: "+previous.Number)
-	}
-	if len(continues) > 0 {
-		notices = append(notices, fmt.Sprintf("Continues %s: alerts recorded there now belong to this alert group, usually after a change to Alertmanager's routes or group_by.",
-			joinNumbers(continues)))
-	}
-	if overflow {
-		notices = append(notices, "NOTE: "+overflowNotice)
-	}
-	return notices
-}
-
-const reopenNotice = "This ticket was awaiting closure and has been reopened because its alert group fired again."
-
-// noteNotices are the system notices for a change note: reopening,
-// overflow, and the line describing any priority change.
-func noteNotices(reopened, overflow bool, priority string) []string {
-	var notices []string
-	if reopened {
-		notices = append(notices, reopenNotice)
-	}
-	if overflow {
-		notices = append(notices, "NOTE: "+overflowNotice)
-	}
-	if priority != "" {
-		notices = append(notices, priority)
-	}
-	return notices
-}
-
-func movedTitle(moved int, current Ticket, emptied bool) string {
-	if emptied {
-		return fmt.Sprintf("All alerts moved to %s", current.Number)
-	}
-	if moved == 1 {
-		return fmt.Sprintf("1 alert moved to %s", current.Number)
-	}
-	return fmt.Sprintf("%d alerts moved to %s", moved, current.Number)
-}
-
-func movedDescription(n Notification, moved []Alert, current Ticket, emptied bool, loc *time.Location) string {
-	var b strings.Builder
-
-	fmt.Fprintf(&b, "These alerts now belong to alert group %s, tracked on %s. "+
-		"This usually follows a change to Alertmanager's routes or group_by.\n", formatLabels(n.GroupLabels, nil), current.Number)
-	if emptied {
-		fmt.Fprintf(&b, "No alerts remain on this ticket; further changes are recorded on %s.\n", current.Number)
-	}
-	fmt.Fprintf(&b, "\nMoved (%d):\n", len(moved))
-	writeAlerts(&b, n, moved, loc)
-
-	return truncate(b.String(), maxNoteDescription)
-}
-
 func joinNumbers(tickets []Ticket) string {
 	s := make([]string, 0, len(tickets))
 	for _, t := range tickets {
 		s = append(s, t.Number)
 	}
 	return strings.Join(s, ", ")
-}
-
-func duplicateDescription(current Ticket) string {
-	return fmt.Sprintf("This ticket duplicates %s, which is the ticket now tracking this alert group. "+
-		"Further changes will only be recorded on %s; merge or complete this ticket.", current.Number, current.Number)
 }
 
 func alertmanagerLink(n Notification) string {
@@ -191,40 +96,4 @@ func joinIDs(ids []int64) string {
 		s = append(s, fmt.Sprint(id))
 	}
 	return strings.Join(s, ", ")
-}
-
-// linkedNotice is the system notice on a new ticket linked to a problem
-// ticket.
-func linkedNotice(problem Ticket) string {
-	return fmt.Sprintf("Linked to problem ticket %s: this alert group fired again soon after its previous ticket was completed.", problem.Number)
-}
-
-// problemNotices are the system notices for a new problem ticket, naming the
-// tickets it links and explaining a previous ticket left unlinked.
-func problemNotices(rec *recurrence, created Ticket) []string {
-	if rec.linkPrevious() {
-		return []string{fmt.Sprintf("Linked tickets: %s, %s", rec.previous.Number, created.Number)}
-	}
-
-	notices := []string{"Linked ticket: " + created.Number}
-	switch {
-	case rec.previousProblem != nil:
-		notices = append(notices, fmt.Sprintf("Previous ticket %s stays linked to completed problem ticket %s.", rec.previous.Number, rec.previousProblem.Number))
-	default:
-		notices = append(notices, fmt.Sprintf("NOTE: previous ticket %s is not an Incident, so it could not be linked to this problem ticket.", rec.previous.Number))
-	}
-	return notices
-}
-
-// recurrenceFailedNotice explains on a new ticket why it is not linked to a
-// problem ticket.
-func recurrenceFailedNotice(rec *recurrence) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "NOTE: this alert group fired again soon after its previous ticket %s was completed, but linking to a problem ticket failed: %v\n\n", rec.previous.Number, rec.err)
-	if rec.problem != nil {
-		fmt.Fprintf(&b, "Link this ticket, and %s if it is an Incident, to problem ticket %s by hand.", rec.previous.Number, rec.problem.Number)
-	} else {
-		fmt.Fprintf(&b, "Link this ticket, and %s if it is an Incident, to a problem ticket by hand.", rec.previous.Number)
-	}
-	return b.String()
 }

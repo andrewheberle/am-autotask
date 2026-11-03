@@ -207,8 +207,8 @@ type Options struct {
 	NoteType    int
 	NotePublish int
 
-	// Templates word ticket titles and descriptions and change notes.
-	// Default the built-in templates.
+	// Templates word every ticket and ticket note. Default the built-in
+	// templates.
 	Templates *Templates
 
 	// HandoverLockTimeout bounds the wait for another alert group's lock
@@ -429,10 +429,11 @@ func (r *Receiver) retireDuplicates(ctx context.Context, externalID string, curr
 	for _, d := range duplicates {
 		r.opts.Logger.WarnContext(ctx, "alert group has more than one open ticket", "current", current.Number, "duplicate", d.Number)
 
+		w := r.opts.Templates.DuplicateNote(current)
 		if err := r.at.CreateNote(ctx, NewNote{
 			TicketID:    d.ID,
-			Title:       "Duplicate alert group ticket",
-			Description: duplicateDescription(current),
+			Title:       w.Title,
+			Description: w.Description,
 			NoteType:    r.opts.NoteType,
 			Publish:     r.opts.NotePublish,
 		}); err != nil {
@@ -477,19 +478,21 @@ func (r *Receiver) update(ctx context.Context, n Notification, t Ticket) (change
 	if noted {
 		value, overflow := encodeRecorded(keys(recorded))
 
-		severity, _ := r.severity(n, alertsWithStatus(n.Alerts, statusFiring))
-		data := NoteData{
-			Group:         group(n, severity),
-			Fired:         alertData(fired),
-			Resolved:      alertData(resolved),
-			GroupResolved: groupResolved,
-			Reopened:      reopened,
-			TicketNumber:  t.Number,
-		}
+		severity, _ := r.severity(n)
+		w := r.word(ctx, r.opts.Templates.ChangeNote(NoteInput{
+			Notification: n,
+			Severity:     severity,
+			Fired:        fired,
+			Resolved:     resolved,
+			TicketNumber: t.Number,
+			Reopened:     reopened,
+			Overflow:     overflow,
+			Priority:     pc.notice,
+		}))
 		if err := r.at.CreateNote(ctx, NewNote{
 			TicketID:    t.ID,
-			Title:       truncate(r.render(ctx, TemplateNoteTitle, data), maxNoteTitle),
-			Description: truncate(withNotices(noteNotices(reopened, overflow, pc.note), r.render(ctx, TemplateNoteDescription, data)), maxNoteDescription),
+			Title:       w.Title,
+			Description: w.Description,
 			NoteType:    r.opts.NoteType,
 			Publish:     r.opts.NotePublish,
 		}); err != nil {
@@ -557,15 +560,21 @@ func (r *Receiver) create(ctx context.Context, n Notification, externalID string
 		span.SetAttributes(attribute.String("am_autotask.catchall", catchAll))
 	}
 	recorded, overflow := encodeRecorded(fingerprints(firing))
-	severity, priority := r.severity(n, firing)
-	data := TicketData{Group: group(n, severity), Alerts: alertData(firing)}
-	notices := ticketNotices(ambiguous, previous, orphanTickets(orphans), overflow)
-	description := r.render(ctx, TemplateTicketDescription, data)
+	severity, priority := r.severity(n)
+	in := TicketInput{
+		Notification: n,
+		Severity:     severity,
+		Ambiguous:    ambiguous,
+		Previous:     previous,
+		Continues:    orphanTickets(orphans),
+		Overflow:     overflow,
+	}
+	w := r.word(ctx, r.opts.Templates.Ticket(in))
 
 	t := NewTicket{
 		CompanyID:      companyID,
-		Title:          truncate(r.render(ctx, TemplateTicketTitle, data), maxTicketTitle),
-		Description:    truncate(withNotices(notices, description), maxTicketDescription),
+		Title:          w.Title,
+		Description:    w.Description,
 		ExternalID:     externalID,
 		Priority:       priority,
 		Status:         r.opts.Status,
@@ -591,7 +600,10 @@ func (r *Receiver) create(ctx context.Context, n Notification, externalID string
 	if rec.follows() {
 		linked := t
 		linked.ProblemTicketID = rec.problem.ID
-		linked.Description = truncate(withNotices(append(notices, linkedNotice(*rec.problem)), description), maxTicketDescription)
+		in.Problem = rec.problem
+		// the same templates and data as the unlinked wording, whose
+		// fallbacks have already been reported
+		linked.Description = r.opts.Templates.Ticket(in).Description
 		created, err = r.at.CreateTicket(ctx, linked)
 		if errors.Is(err, ErrPermanent) {
 			// Autotask rejected the link, perhaps because the problem ticket
@@ -610,10 +622,24 @@ func (r *Receiver) create(ctx context.Context, n Notification, externalID string
 		r.opts.Observer.CatchAll(catchAll)
 	}
 	if rec != nil {
-		r.linkRecurrence(ctx, rec, data, t, created)
+		r.linkRecurrence(ctx, n, severity, rec, t, created)
 	}
 
 	return &created, nil
+}
+
+// word reports the ticket templates that fell back to their built-in
+// definitions while wording w, returning w.
+func (r *Receiver) word(ctx context.Context, w Wording) Wording {
+	for _, f := range w.Fallbacks {
+		if f.Err != nil {
+			r.opts.Logger.ErrorContext(ctx, "ticket template failed; using the built-in template", "template", f.Template, "error", f.Err)
+			r.opts.Observer.TemplateFailed(f.Template)
+			continue
+		}
+		r.opts.Logger.WarnContext(ctx, "ticket template rendered an empty title; using the built-in template", "template", f.Template)
+	}
+	return w
 }
 
 // company returns the company for an alert group. When that is the catch-all

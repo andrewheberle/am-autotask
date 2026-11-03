@@ -104,7 +104,7 @@ The templates file is read at startup; restart to apply changes. To see what the
 am-autotask templates --templates templates.tmpl [--notification webhook.json]
 ```
 
-This prints every block rendered for a built-in sample notification, or for an Alertmanager webhook payload saved as JSON, treating its firing alerts as a new ticket, all its alerts as a change note, and its ticket as a recurrence raising a problem ticket. System notices are not shown. `templates` is also read from `--config` and `AM_AUTOTASK_TEMPLATES`.
+This prints every block rendered for a built-in sample notification, or for an Alertmanager webhook payload saved as JSON, treating its firing alerts as a new ticket, all its alerts as a change note, and its ticket as a recurrence raising a problem ticket. Output is tidied and cut to Autotask's limits as on real tickets, and `.Severity` is found as `serve` finds it, from `ticket.severitylabel` and `ticket.severityorder` (see [Priority and severity](#priority-and-severity)). System notices are not shown. `templates` and the two severity settings are also read from `--config` and their `AM_AUTOTASK_*` environment variables, so `--config` with `serve`'s configuration file previews what `serve` would write.
 
 ## Autotask setup
 

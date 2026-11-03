@@ -77,7 +77,7 @@ func (rec *recurrence) linkPrevious() bool {
 // problem ticket, raising one if it is not already linked. Failures are
 // logged and explained on the new ticket rather than returned: the ticket
 // exists, so a retry would find it as current and never link it.
-func (r *Receiver) linkRecurrence(ctx context.Context, rec *recurrence, data TicketData, t NewTicket, created Ticket) {
+func (r *Receiver) linkRecurrence(ctx context.Context, n Notification, severity string, rec *recurrence, t NewTicket, created Ticket) {
 	outcome := RecurrenceFailed
 	defer func() {
 		trace.SpanFromContext(ctx).SetAttributes(attribute.String("am_autotask.recurrence", outcome))
@@ -93,7 +93,7 @@ func (r *Receiver) linkRecurrence(ctx context.Context, rec *recurrence, data Tic
 		return
 	}
 
-	problem, err := r.raiseProblem(ctx, rec, data, t, created)
+	problem, err := r.raiseProblem(ctx, n, severity, rec, t, created)
 	if err != nil {
 		rec.err = err
 		r.recurrenceFailed(ctx, rec, created)
@@ -115,10 +115,11 @@ func (r *Receiver) linkRecurrence(ctx context.Context, rec *recurrence, data Tic
 	}
 
 	outcome = RecurrenceRaised
+	w := r.opts.Templates.LinkedNote(problem)
 	if err := r.at.CreateNote(ctx, NewNote{
 		TicketID:    created.ID,
-		Title:       "Linked to problem ticket " + problem.Number,
-		Description: linkedNotice(problem),
+		Title:       w.Title,
+		Description: w.Description,
 		NoteType:    r.opts.NoteType,
 		Publish:     r.opts.NotePublish,
 	}); err != nil {
@@ -127,13 +128,23 @@ func (r *Receiver) linkRecurrence(ctx context.Context, rec *recurrence, data Tic
 }
 
 // raiseProblem creates a problem ticket for a recurrence, taking its fields
-// from t, the new ticket as raised.
-func (r *Receiver) raiseProblem(ctx context.Context, rec *recurrence, data TicketData, t NewTicket, created Ticket) (Ticket, error) {
-	pd := ProblemData{
-		TicketData:           data,
+// from t, the new ticket as raised for n.
+func (r *Receiver) raiseProblem(ctx context.Context, n Notification, severity string, rec *recurrence, t NewTicket, created Ticket) (Ticket, error) {
+	in := ProblemInput{
+		Notification:         n,
+		Severity:             severity,
 		TicketTitle:          t.Title,
 		TicketNumber:         created.Number,
 		PreviousTicketNumber: rec.previous.Number,
+		Linked:               []string{created.Number},
+	}
+	switch {
+	case rec.linkPrevious():
+		in.Linked = []string{rec.previous.Number, created.Number}
+	case rec.previousProblem != nil:
+		in.PreviousProblem = rec.previousProblem
+	default:
+		in.PreviousNotIncident = true
 	}
 	companyID := t.CompanyID
 	if r.opts.ProblemCompanyID != nil {
@@ -144,10 +155,11 @@ func (r *Receiver) raiseProblem(ctx context.Context, rec *recurrence, data Ticke
 		queueID = r.opts.ProblemQueueID
 	}
 
+	w := r.word(ctx, r.opts.Templates.ProblemTicket(in))
 	problem, err := r.at.CreateTicket(ctx, NewTicket{
 		CompanyID:    companyID,
-		Title:        truncate(r.render(ctx, TemplateProblemTitle, pd), maxTicketTitle),
-		Description:  truncate(withNotices(problemNotices(rec, created), r.render(ctx, TemplateProblemDescription, pd)), maxTicketDescription),
+		Title:        w.Title,
+		Description:  w.Description,
 		Priority:     t.Priority,
 		Status:       t.Status,
 		TicketType:   TicketTypeProblem,
@@ -171,10 +183,11 @@ func (r *Receiver) recurrenceFailed(ctx context.Context, rec *recurrence, create
 	r.opts.Logger.ErrorContext(ctx, "linking recurrence to a problem ticket failed",
 		"ticket", created.Number, "previous", rec.previous.Number, "error", rec.err)
 
+	w := r.opts.Templates.RecurrenceFailedNote(RecurrenceFailure{Previous: rec.previous, Problem: rec.problem, Err: rec.err})
 	if err := r.at.CreateNote(ctx, NewNote{
 		TicketID:    created.ID,
-		Title:       "Not linked to a problem ticket",
-		Description: recurrenceFailedNotice(rec),
+		Title:       w.Title,
+		Description: w.Description,
 		NoteType:    r.opts.NoteType,
 		Publish:     r.opts.NotePublish,
 	}); err != nil {
