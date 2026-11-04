@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.1](https://github.com/andrewheberle/am-autotask/compare/v0.14.0...v0.14.1) (2026-11-04)
+
+
+### Bug Fixes
+
+* **autotask:** recognise rule rejections Autotask answers with HTTP 500 ([#72](https://github.com/andrewheberle/am-autotask/issues/72)) ([28ada0f](https://github.com/andrewheberle/am-autotask/commit/28ada0fc51744aaec437ca7f2098c699f7991155))
+* **templates:** word every ticket and note in one module ([#68](https://github.com/andrewheberle/am-autotask/issues/68)) ([f5e313a](https://github.com/andrewheberle/am-autotask/commit/f5e313acb17cd4e6f3b410edb2b910178e6402e4))
+
 ## [0.14.0](https://github.com/andrewheberle/am-autotask/compare/v0.13.0...v0.14.0) (2026-11-03)
 
 
