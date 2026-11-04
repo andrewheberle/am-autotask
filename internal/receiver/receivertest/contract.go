@@ -5,6 +5,7 @@ package receivertest
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -26,7 +27,10 @@ type Harness struct {
 // stores completion times to the millisecond.
 var completedAt = time.Date(2026, 10, 17, 4, 0, 0, 0, time.UTC)
 
-const statusNew = 1
+const (
+	statusNew                = 1
+	ticketTypeServiceRequest = 1
+)
 
 // TestAutotask runs the contract against the adapter newHarness returns,
 // which must start with no tickets.
@@ -41,6 +45,7 @@ func TestAutotask(t *testing.T, newHarness func(t *testing.T) Harness) {
 		{"created ticket has a number and its fields", createdTicket},
 		{"update changes only the fields given", updateOnlyGiven},
 		{"tickets link to problem tickets", problemLink},
+		{"a link Autotask rejects fails permanently", rejectedLink},
 		{"open alert tickets carry only some fields", openAlertTickets},
 	}
 	for _, tt := range tests {
@@ -216,5 +221,35 @@ func openAlertTickets(t *testing.T, h Harness) {
 	}
 	if want := []receiver.Ticket{partial(one), partial(two)}; !reflect.DeepEqual(got, want) {
 		t.Errorf("OpenAlertTickets =\n%+v\nwant only open alert tickets, with only some fields:\n%+v", got, want)
+	}
+}
+
+// rejectedLink checks links Autotask refuses: to a ticket that is not a
+// Problem, and from a ticket that is not an Incident. Retrying cannot help,
+// so the receiver must be able to tell (ADR-0012).
+func rejectedLink(t *testing.T, h Harness) {
+	ctx := context.Background()
+	problem := create(t, h, receiver.NewTicket{CompanyID: 100, Title: "p", Description: "p", Priority: 4, Status: statusNew, TicketType: receiver.TicketTypeProblem})
+	incident := create(t, h, alertTicket("am:one"))
+	service := alertTicket("am:two")
+	service.TicketType = ticketTypeServiceRequest
+	request := create(t, h, service)
+
+	linked := alertTicket("am:three")
+	linked.ProblemTicketID = request.ID
+	if _, err := h.Autotask.CreateTicket(ctx, linked); !errors.Is(err, receiver.ErrPermanent) {
+		t.Errorf("creating an Incident linked to a ticket that is not a Problem: err = %v, want one wrapping ErrPermanent", err)
+	}
+	if err := h.Autotask.UpdateTicket(ctx, incident.ID, receiver.TicketUpdate{ProblemTicketID: &request.ID}); !errors.Is(err, receiver.ErrPermanent) {
+		t.Errorf("linking an Incident to a ticket that is not a Problem: err = %v, want one wrapping ErrPermanent", err)
+	}
+	if err := h.Autotask.UpdateTicket(ctx, request.ID, receiver.TicketUpdate{ProblemTicketID: &problem.ID}); !errors.Is(err, receiver.ErrPermanent) {
+		t.Errorf("linking a Service Request to a Problem: err = %v, want one wrapping ErrPermanent", err)
+	}
+
+	for _, id := range []int64{incident.ID, request.ID} {
+		if got := get(t, h, id); got.ProblemTicketID != 0 {
+			t.Errorf("ticket %d linked to %d after a rejected link", id, got.ProblemTicketID)
+		}
 	}
 }
