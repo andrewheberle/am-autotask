@@ -343,7 +343,7 @@ func TestErrorsAreClassified(t *testing.T) {
 		permanent bool
 	}{
 		{`{"errors":["Data violation: Service Request tickets cannot be associated with a Problem Ticket..","Error updating entity for record number [1]."]}`, true},
-		{`{"errors":["The UPDATE statement conflicted with the CHECK constraint \"CK_tblTask_child_ticket_count\". The conflict occurred in database \"TF_703050\", table \"dbo.tblTask\"."]}`, true},
+		{`{"errors":["The UPDATE statement conflicted with the CHECK constraint \"CK_tblTask_child_ticket_count\". The conflict occurred in database \"TF_000000\", table \"dbo.tblTask\"."]}`, true},
 		{`{"errors":["Transaction (Process ID 61) was deadlocked on lock resources with another process and has been chosen as the deadlock victim. Rerun the transaction."]}`, false},
 		{`{"errors":["something went wrong"]}`, false},
 	}

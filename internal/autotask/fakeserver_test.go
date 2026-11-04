@@ -429,7 +429,7 @@ func (f *fakeServer) checkProblemLink(ticketType, problemID any, update string) 
 			errs = append(errs, "Error updating entity for record number [1].")
 		}
 	case problem == nil || problem["ticketType"] != 3:
-		errs = []string{`The UPDATE statement conflicted with the CHECK constraint "CK_tblTask_child_ticket_count". The conflict occurred in database "TF_703050", table "dbo.tblTask".`}
+		errs = []string{`The UPDATE statement conflicted with the CHECK constraint "CK_tblTask_child_ticket_count". The conflict occurred in database "TF_000000", table "dbo.tblTask".`}
 		if update != "" {
 			errs = append(errs, "Error updating record number [1].")
 		}
