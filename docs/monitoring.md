@@ -22,7 +22,7 @@ All am-autotask metrics are prefixed `am_autotask_`. The standard Go runtime (`g
 | `am_autotask_notifications_total` | counter | `result` | Webhook requests by result: `handled`, `unauthorized` (missing or wrong bearer token), `invalid` (malformed or unsupported webhook version), `temporary_failure` (answered 500 so Alertmanager retries, including while still starting up, or 503 to a forwarded notification after leadership moved) and `permanent_failure` (acknowledged without reaching Autotask). With [leader election](../README.md#multiple-replicas), notifications a standby forwards are counted by the leader, not the standby. |
 | `am_autotask_tickets_created_total` | counter | | Autotask tickets created, including problem tickets. |
 | `am_autotask_notes_created_total` | counter | | Ticket notes created, including notes on duplicate and orphaned tickets. |
-| `am_autotask_autotask_errors_total` | counter | `operation`, `kind` | Failed Autotask requests made while handling notifications. `operation` is one of `open_tickets`, `previous_ticket`, `get_ticket`, `open_alert_tickets`, `create_ticket`, `create_note` or `update_ticket`; `kind` is `temporary`, `permanent` or `rate_limited` (HTTP 429). Company selector reloads are not counted here; see `am_autotask_company_selectors_age_seconds`. |
+| `am_autotask_autotask_errors_total` | counter | `operation`, `kind` | Failed Autotask requests made while handling notifications. `operation` is one of `open_tickets`, `previous_ticket`, `get_ticket`, `open_alert_tickets`, `create_ticket`, `create_note` or `update_ticket`; `kind` is `temporary`, `permanent` (rejected in a way retrying cannot fix: HTTP 4xx other than 429, or a rule rejection Autotask answers with HTTP 500, such as `Data violation: …`; see [ADR-0012](adr/0012-autotask-rule-rejections-are-recognised-by-message.md)) or `rate_limited` (HTTP 429). Company selector reloads are not counted here; see `am_autotask_company_selectors_age_seconds`. |
 | `am_autotask_alerts_moved_total` | counter | | Alerts moved off orphaned tickets onto their alert group's current ticket. |
 | `am_autotask_orphaned_tickets_handed_over_total` | counter | | [Orphaned tickets](../README.md#how-it-works) handed over because all of their alerts moved to their new tickets, whatever `ticket.resolvedstatus` is. Each is then set to `ticket.resolvedstatus`, unless that is `0`. Formerly `am_autotask_orphaned_tickets_completed_total`, which was only counted when `ticket.resolvedstatus` was set. |
 | `am_autotask_company_selectors_age_seconds` | gauge | | Time since company selectors were last loaded from Autotask. It drops back to zero on each successful reload, every `company.refresh` (default 15 minutes), and keeps growing while reloads fail. It is zero until the first load. |
@@ -195,11 +195,12 @@ Autotask rejected a request in a way retrying cannot fix, so the notification wa
 
 - Search am-autotask's logs for `notification failed permanently`; each entry has Autotask's error message and the notification payload.
 - `am_autotask_autotask_errors_total{kind="permanent"}` shows which operation failed.
+- Autotask answers some rule rejections with HTTP 500 rather than 4xx; am-autotask recognises them by message, such as `Data violation: …` or `conflicted with the CHECK constraint`. A rejected problem ticket link on a recurrence is not a permanent failure: the ticket is raised unlinked, with a note explaining why.
 - Common causes are configuration that has become invalid since startup, such as a deactivated picklist value or catch-all company, or a ticket category that now requires fields am-autotask does not set. Startup validation catches these on the next restart.
 
 ### AmAutotaskTemporaryFailures
 
-Many notifications are failing in ways that can be retried: timeouts, Autotask 5xx responses or rate limiting. Alertmanager retries them, but tickets fall behind.
+Many notifications are failing in ways that can be retried: timeouts, Autotask 5xx responses other than rule rejections, or rate limiting. Alertmanager retries them, but tickets fall behind.
 
 - Check `sum by (operation, kind) (rate(am_autotask_autotask_errors_total[5m]))` for which requests are failing.
 - Check Autotask's status for an outage, and am-autotask's logs for `notification failed; Alertmanager will retry`.

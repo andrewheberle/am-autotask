@@ -101,12 +101,42 @@ func (e *apiError) Error() string {
 	return fmt.Sprintf("autotask returned HTTP %d: %s", e.status, strings.Join(e.messages, "; "))
 }
 
-// Unwrap marks client errors other than rate limiting as permanent.
+// Unwrap marks client errors other than rate limiting as permanent, and the
+// rule rejections Autotask answers with HTTP 500 (ADR-0012).
 func (e *apiError) Unwrap() error {
-	if e.status >= 400 && e.status < 500 && e.status != http.StatusTooManyRequests {
+	switch {
+	case e.status >= 400 && e.status < 500 && e.status != http.StatusTooManyRequests:
+		return receiver.ErrPermanent
+	case e.status == http.StatusInternalServerError && e.ruleRejection():
 		return receiver.ErrPermanent
 	}
 	return nil
+}
+
+// ruleRejections are found in the errors Autotask answers with HTTP 500 when
+// a request breaks one of its rules, so retrying it cannot help. Other HTTP
+// 500 answers, such as a deadlock or lock contention, are worth retrying.
+var ruleRejections = []string{
+	// e.g. "Data violation: Service Request tickets cannot be associated
+	// with a Problem Ticket.."
+	"data violation",
+	// e.g. linking to a ticket that is not a problem ticket, or one that
+	// holds as many incidents as it can: `The UPDATE statement conflicted
+	// with the CHECK constraint "CK_tblTask_child_ticket_count"`
+	"conflicted with the check constraint",
+}
+
+// ruleRejection reports whether Autotask's errors say a rule was broken.
+func (e *apiError) ruleRejection() bool {
+	for _, m := range e.messages {
+		m = strings.ToLower(m)
+		for _, r := range ruleRejections {
+			if strings.Contains(m, r) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // IsRateLimited reports whether err is Autotask rejecting a request for

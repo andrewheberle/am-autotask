@@ -109,7 +109,8 @@ func (f *fakeAutotask) OpenAlertTickets(_ context.Context) ([]receiver.Ticket, e
 	var out []receiver.Ticket
 	for _, t := range f.tickets {
 		if strings.HasPrefix(t.ExternalID, "am:") && t.Status != completeStatus {
-			out = append(out, f.toTicket(t))
+			// only the fields the Autotask client asks for
+			out = append(out, receiver.Ticket{ID: t.ID, Number: t.Number, Status: t.Status, ExternalID: t.ExternalID, RecordedAlerts: t.RecordedAlerts})
 		}
 	}
 	return out, nil

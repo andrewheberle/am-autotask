@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 const (
@@ -82,6 +83,21 @@ func (f *fakeServer) get(name string, id int) entity {
 		}
 	}
 	return nil
+}
+
+// complete simulates a person completing a ticket at a given time.
+func (f *fakeServer) complete(t *testing.T, id int, at time.Time) {
+	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, e := range f.entities["Tickets"] {
+		if e["id"] == id {
+			e["status"] = 5
+			e["completedDate"] = at.UTC().Format(time.RFC3339Nano)
+			return
+		}
+	}
+	t.Fatalf("no ticket %d to complete", id)
 }
 
 func (f *fakeServer) notesFor(ticketID int) []entity {
@@ -331,6 +347,12 @@ func (f *fakeServer) create(w http.ResponseWriter, r *http.Request, name string)
 		return
 	}
 	normalise(e)
+	if name == "Tickets" {
+		if errs := f.checkProblemLink(e["ticketType"], e["problemTicketId"], ""); errs != nil {
+			f.write(w, http.StatusInternalServerError, entity{"errors": errs})
+			return
+		}
+	}
 
 	f.mu.Lock()
 	f.nextID++
@@ -356,6 +378,15 @@ func (f *fakeServer) patch(w http.ResponseWriter, r *http.Request, name string) 
 		f.write(w, http.StatusNotFound, entity{"errors": []string{"no such entity"}})
 		return
 	}
+	if name == "Tickets" {
+		f.mu.Lock()
+		ticketType := e["ticketType"]
+		f.mu.Unlock()
+		if errs := f.checkProblemLink(ticketType, changes["problemTicketId"], "; "); errs != nil {
+			f.write(w, http.StatusInternalServerError, entity{"errors": errs})
+			return
+		}
+	}
 
 	f.mu.Lock()
 	for k, v := range changes {
@@ -378,6 +409,32 @@ func (f *fakeServer) patch(w http.ResponseWriter, r *http.Request, name string) 
 	f.mu.Unlock()
 
 	f.write(w, http.StatusOK, entity{"itemId": id})
+}
+
+// checkProblemLink applies Autotask's rules for linking a ticket of
+// ticketType to the problem ticket problemID, returning the errors Autotask
+// answers a rejected link with, as HTTP 500. update is set for an update,
+// which Autotask follows with a second error naming the record.
+func (f *fakeServer) checkProblemLink(ticketType, problemID any, update string) []string {
+	id, _ := problemID.(int)
+	if id == 0 {
+		return nil
+	}
+	var errs []string
+	switch problem := f.get("Tickets", id); {
+	case ticketType != 2:
+		names := map[any]string{1: "Service Request", 3: "Problem", 4: "Change Request"}
+		errs = []string{fmt.Sprintf("Data violation: %s tickets cannot be associated with a Problem Ticket..", names[ticketType])}
+		if update != "" {
+			errs = append(errs, "Error updating entity for record number [1].")
+		}
+	case problem == nil || problem["ticketType"] != 3:
+		errs = []string{`The UPDATE statement conflicted with the CHECK constraint "CK_tblTask_child_ticket_count". The conflict occurred in database "TF_000000", table "dbo.tblTask".`}
+		if update != "" {
+			errs = append(errs, "Error updating record number [1].")
+		}
+	}
+	return errs
 }
 
 // normalise converts decoded JSON numbers to int and UDF lists to []entity

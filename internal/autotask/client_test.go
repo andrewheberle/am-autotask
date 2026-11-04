@@ -337,6 +337,26 @@ func TestErrorsAreClassified(t *testing.T) {
 		{400, true},
 		{404, true},
 	}
+	// Autotask answers rule rejections with HTTP 500 too
+	bodies := []struct {
+		body      string
+		permanent bool
+	}{
+		{`{"errors":["Data violation: Service Request tickets cannot be associated with a Problem Ticket..","Error updating entity for record number [1]."]}`, true},
+		{`{"errors":["The UPDATE statement conflicted with the CHECK constraint \"CK_tblTask_child_ticket_count\". The conflict occurred in database \"TF_000000\", table \"dbo.tblTask\"."]}`, true},
+		{`{"errors":["Transaction (Process ID 61) was deadlocked on lock resources with another process and has been chosen as the deadlock victim. Rerun the transaction."]}`, false},
+		{`{"errors":["something went wrong"]}`, false},
+	}
+	for _, b := range bodies {
+		f := newFakeServer(t)
+		c := newClient(t, f)
+		f.failNext(500, b.body)
+
+		_, err := c.OpenTickets(ctx, "am:abc")
+		if got := errors.Is(err, receiver.ErrPermanent); got != b.permanent {
+			t.Errorf("HTTP 500 %s: permanent = %v, want %v (err %v)", b.body, got, b.permanent, err)
+		}
+	}
 	for _, tt := range tests {
 		f := newFakeServer(t)
 		c := newClient(t, f)
@@ -702,6 +722,7 @@ func TestCreateTicket(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newFakeServer(t)
 			c := newClient(t, f)
+			f.add("Tickets", entity{"id": 7, "ticketNumber": "T20261017.0007", "status": 1, "ticketType": 3})
 
 			created, err := c.CreateTicket(ctx, tt.ticket)
 			if err != nil {
@@ -724,6 +745,7 @@ func TestCreateTicket(t *testing.T) {
 func TestUpdateTicketLinksProblemTicket(t *testing.T) {
 	f := newFakeServer(t)
 	c := newClient(t, f)
+	f.add("Tickets", entity{"id": 7, "ticketNumber": "T20261017.0007", "status": 1, "ticketType": 3})
 	created, _ := c.CreateTicket(ctx, receiver.NewTicket{CompanyID: 1, Title: "a", ExternalID: "am:abc", Priority: 1, Status: 5, TicketType: 2})
 
 	problem := int64(7)

@@ -135,7 +135,9 @@ type Autotask interface {
 	// Ticket returns the ticket with this ID, or nil if there is none.
 	Ticket(ctx context.Context, id int64) (*Ticket, error)
 	// OpenAlertTickets returns every ticket that is not complete and whose
-	// external ID begins with "am:", across all alert groups.
+	// external ID begins with "am:", across all alert groups. As there may be
+	// many, only each ticket's ID, Number, Status, ExternalID and
+	// RecordedAlerts are set; read a ticket again for the rest.
 	OpenAlertTickets(ctx context.Context) ([]Ticket, error)
 	// CreateTicket creates a ticket, returning it with its number.
 	CreateTicket(ctx context.Context, t NewTicket) (Ticket, error)
