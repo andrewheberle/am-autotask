@@ -5,13 +5,13 @@ go 1.26.0
 toolchain go1.27.3
 
 require (
-	github.com/andrewheberle/configger v0.2.2
+	github.com/andrewheberle/configger v0.2.3
 	github.com/andrewheberle/simplecommand v0.8.0
 	github.com/bep/simplecobra v0.8.0
 	github.com/prometheus/alertmanager v0.34.2
 	github.com/prometheus/client_golang v1.25.0
 	github.com/spf13/cobra v1.10.2
-	github.com/spf13/pflag v1.0.10
+	github.com/spf13/pflag v1.1.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.72.0
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.47.0
@@ -39,7 +39,7 @@ require (
 	github.com/knadh/koanf/parsers/yaml v1.1.1 // indirect
 	github.com/knadh/koanf/providers/file v1.2.1 // indirect
 	github.com/knadh/koanf/providers/posflag v1.0.2 // indirect
-	github.com/knadh/koanf/v2 v2.4.0 // indirect
+	github.com/knadh/koanf/v2 v2.4.1 // indirect
 	github.com/mitchellh/copystructure v1.2.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
