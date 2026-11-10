@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/andrewheberle/am-autotask/compare/v0.14.1...v0.14.2) (2026-11-10)
+
+
+### Bug Fixes
+
+* **deps:** update go toolchain directive to v1.27.4 ([#80](https://github.com/andrewheberle/am-autotask/issues/80)) ([3f22dad](https://github.com/andrewheberle/am-autotask/commit/3f22dad77dec5032526af51201926f6f2d19367e))
+
 ## [0.14.1](https://github.com/andrewheberle/am-autotask/compare/v0.14.0...v0.14.1) (2026-11-04)
 
 
