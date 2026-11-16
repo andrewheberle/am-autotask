@@ -19,7 +19,7 @@ am-autotask [command] [flags]
 ### Options
 
 ```
-  -h, --help   help for am-autotask
+  -h, --help[=true|false]   help for am-autotask
 ```
 
 ### SEE ALSO

@@ -19,8 +19,8 @@ am-autotask lookup companies [flags] [args]
 ### Options
 
 ```
-      --all    include inactive companies
-  -h, --help   help for companies
+      --all[=true|false]    include inactive companies
+  -h, --help[=true|false]   help for companies
 ```
 
 ### Options inherited from parent commands
