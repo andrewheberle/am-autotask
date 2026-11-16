@@ -21,8 +21,8 @@ am-autotask lookup worktypes [flags] [args]
 ### Options
 
 ```
-      --all    include inactive work types
-  -h, --help   help for worktypes
+      --all[=true|false]    include inactive work types
+  -h, --help[=true|false]   help for worktypes
 ```
 
 ### Options inherited from parent commands

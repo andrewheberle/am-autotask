@@ -26,7 +26,7 @@ am-autotask lookup [command] [flags]
       --autotask.usernamefile string          file containing autotask.username
       --autotask.zoneurl string               Autotask zone information URL (default "https://webservices.autotask.net/atservicesrest/v1.0/zoneInformation")
       --config string                         path to YAML configuration file
-  -h, --help                                  help for lookup
+  -h, --help[=true|false]                     help for lookup
 ```
 
 ### SEE ALSO

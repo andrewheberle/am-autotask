@@ -30,7 +30,7 @@ am-autotask templates [flags] [args]
 
 ```
       --config string                  path to YAML configuration file
-  -h, --help                           help for templates
+  -h, --help[=true|false]              help for templates
       --notification string            path to an Alertmanager webhook payload (JSON) to render instead of the built-in sample
       --templates string               path to a file of ticket templates overriding the built-in wording (optional)
       --ticket.severitylabel string    label whose value is the alert group's severity (default "severity")

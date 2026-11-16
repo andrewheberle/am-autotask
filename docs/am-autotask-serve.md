@@ -36,9 +36,9 @@ am-autotask serve [flags] [args]
       --company.refresh duration              how often company selectors are reloaded (default 15m0s)
       --company.udf string                    name of the Company UDF holding company selectors (default "Alertmanager Selectors")
       --config string                         path to YAML configuration file
-  -h, --help                                  help for serve
+  -h, --help[=true|false]                     help for serve
       --leaderelection.address string         host:port other replicas forward notifications to while this one leads, such as the pod IP and listen port (required with leaderelection.enabled)
-      --leaderelection.enabled                run as one of several replicas in Kubernetes, handling notifications only while holding a Lease and otherwise forwarding them to the replica that does
+      --leaderelection.enabled[=true|false]   run as one of several replicas in Kubernetes, handling notifications only while holding a Lease and otherwise forwarding them to the replica that does
       --leaderelection.identity string        name of this replica on the Lease; default the host name, which is the pod name
       --leaderelection.lease string           name of the Lease (default "am-autotask")
       --leaderelection.namespace string       namespace of the Lease; default the pod's own namespace

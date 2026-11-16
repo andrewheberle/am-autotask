@@ -21,8 +21,8 @@ am-autotask lookup picklists [flags] [args]
 ### Options
 
 ```
-      --all    include inactive values
-  -h, --help   help for picklists
+      --all[=true|false]    include inactive values
+  -h, --help[=true|false]   help for picklists
 ```
 
 ### Options inherited from parent commands
