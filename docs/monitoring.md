@@ -110,7 +110,7 @@ With [tracing](../README.md#tracing) enabled, each notification is a trace conti
 
 ### Exemplars
 
-Each observation of `am_autotask_autotask_request_duration_seconds` made in a sampled span carries that span's trace ID as an exemplar with the label `trace_id`, so a slow Autotask operation links straight to its trace instead of going through the logs. Observations in unsampled spans, or with tracing off and no trace context from Alertmanager, have no exemplar. With tracing off, an operation for a notification Alertmanager sent with a sampled trace context still carries Alertmanager's trace ID, but that trace has no am-autotask spans.
+Each observation of `am_autotask_autotask_request_duration_seconds` made in a span that am-autotask records and samples carries that span's trace ID as an exemplar with the label `trace_id`, so a slow Autotask operation links straight to its trace instead of going through the logs. Observations in unsampled spans have no exemplar, and neither do observations with tracing off, even when Alertmanager sent a sampled trace context: that trace has no am-autotask spans, so it wouldn't show the operation.
 
 Exemplars are only exposed when the scraper asks for OpenMetrics (or protobuf), which Prometheus does unless its `scrape_protocols` leave them out; the classic text format has none. To use them:
 

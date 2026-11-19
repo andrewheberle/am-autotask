@@ -14,6 +14,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/andrewheberle/am-autotask/internal/receiver"
 	"github.com/andrewheberle/am-autotask/internal/tracing"
@@ -165,25 +166,39 @@ func TestDurationExemplars(t *testing.T) {
 		// sampler samples the operation's span; nil makes the operation
 		// outside any span
 		sampler      sdktrace.Sampler
+		// tracingOff wraps the operation with the no-op tracer used when
+		// tracing is off, under a sampled trace context from the caller
+		tracingOff   bool
 		wantExemplar bool
 	}{
 		{name: "sampled span", sampler: sdktrace.AlwaysSample(), wantExemplar: true},
 		{name: "unsampled span", sampler: sdktrace.NeverSample(), wantExemplar: false},
 		{name: "no span", sampler: nil, wantExemplar: false},
+		{name: "tracing off under a sampled caller", tracingOff: true, wantExemplar: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := newMetrics(true, nil)
 			sr := tracetest.NewSpanRecorder()
+			ctx := context.Background()
 			// wrapped as serve does, so the span is live while it is observed
 			at := m.Instrument(fakeAutotask{})
-			if tt.sampler != nil {
+			switch {
+			case tt.tracingOff:
+				ctx = trace.ContextWithRemoteSpanContext(ctx, trace.NewSpanContext(trace.SpanContextConfig{
+					TraceID:    trace.TraceID{0x01},
+					SpanID:     trace.SpanID{0x01},
+					TraceFlags: trace.FlagsSampled,
+					Remote:     true,
+				}))
+				at = tracing.Autotask(at, noop.NewTracerProvider())
+			case tt.sampler != nil:
 				at = tracing.Autotask(at, sdktrace.NewTracerProvider(
 					sdktrace.WithSampler(tt.sampler), sdktrace.WithSpanProcessor(sr),
 				))
 			}
 
-			if _, err := at.Ticket(context.Background(), 1); err != nil {
+			if _, err := at.Ticket(ctx, 1); err != nil {
 				t.Fatal(err)
 			}
 
@@ -203,12 +218,10 @@ func TestDurationExemplars(t *testing.T) {
 }
 
 func TestHandlerExposesExemplarsWithOpenMetrics(t *testing.T) {
-	traceID := trace.TraceID{0x0a, 0xf7, 0x65, 0x19, 0x16, 0xcd, 0x43, 0xdd, 0x84, 0x48, 0xeb, 0x21, 0x1c, 0x80, 0x31, 0x9c}
-	ctx := trace.ContextWithSpanContext(context.Background(), trace.NewSpanContext(trace.SpanContextConfig{
-		TraceID:    traceID,
-		SpanID:     trace.SpanID{0xb7, 0xad, 0x6b, 0x71, 0x69, 0x20, 0x33, 0x31},
-		TraceFlags: trace.FlagsSampled,
-	}))
+	ctx, span := sdktrace.NewTracerProvider(sdktrace.WithSampler(sdktrace.AlwaysSample())).
+		Tracer("test").Start(context.Background(), "operation")
+	t.Cleanup(func() { span.End() })
+	traceID := span.SpanContext().TraceID()
 	m := newMetrics(true, nil)
 	if _, err := m.Instrument(fakeAutotask{}).Ticket(ctx, 1); err != nil {
 		t.Fatal(err)

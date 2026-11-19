@@ -282,9 +282,13 @@ func (i *instrumented) observe(ctx context.Context, operation string, start time
 
 // observeWithTrace observes v, with the trace ID of the span in ctx as an
 // exemplar if that span is sampled, so a slow observation links to its trace.
+// The span must be recording: with tracing off, ctx can still carry the
+// caller's sampled trace context (Alertmanager's), whose trace has no spans
+// for the operation, so an exemplar would link to a trace without it.
 func observeWithTrace(ctx context.Context, o prometheus.Observer, v float64) {
-	sc := trace.SpanContextFromContext(ctx)
-	if eo, ok := o.(prometheus.ExemplarObserver); ok && sc.IsValid() && sc.IsSampled() {
+	span := trace.SpanFromContext(ctx)
+	sc := span.SpanContext()
+	if eo, ok := o.(prometheus.ExemplarObserver); ok && span.IsRecording() && sc.IsValid() && sc.IsSampled() {
 		eo.ObserveWithExemplar(v, prometheus.Labels{exemplarTraceIDLabel: sc.TraceID().String()})
 		return
 	}
