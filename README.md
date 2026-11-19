@@ -386,7 +386,7 @@ Alertmanager sends W3C trace context with each notification when its own [tracin
 
 Alert labels and annotations are never recorded, and Autotask URLs are recorded without their query strings, which carry the API user name and search filters. Trace context is not sent to Autotask. Company selector reloads are traced too: periodic reloads as their own traces, and a reload triggered by an alert group matching no company as part of that notification's trace.
 
-Log lines written while handling a notification carry its `trace_id` and `span_id`. Export failures are logged at `warn`, at most once a minute; tracing never delays or fails a notification.
+Log lines written while handling a notification carry its `trace_id` and `span_id`, and the Autotask request duration metric carries it as an [exemplar](docs/monitoring.md#exemplars) when the span is sampled. Export failures are logged at `warn`, at most once a minute; tracing never delays or fails a notification.
 
 ## Installing
 
