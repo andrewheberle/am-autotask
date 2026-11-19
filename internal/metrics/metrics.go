@@ -10,6 +10,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/andrewheberle/am-autotask/internal/autotask"
 	"github.com/andrewheberle/am-autotask/internal/receiver"
@@ -17,6 +18,10 @@ import (
 )
 
 const namespace = "am_autotask"
+
+// exemplarTraceIDLabel is the exemplar label that carries the trace ID of the
+// span an Autotask operation was observed in.
+const exemplarTraceIDLabel = "trace_id"
 
 // Metrics holds the receiver's collectors in their own registry.
 type Metrics struct {
@@ -183,9 +188,10 @@ func New(opts Options) *Metrics {
 	return m
 }
 
-// Handler serves the metrics.
+// Handler serves the metrics. Exemplars are only exposed to scrapers that
+// negotiate OpenMetrics (or protobuf), not in the classic text format.
 func (m *Metrics) Handler() http.Handler {
-	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})
+	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{EnableOpenMetrics: true})
 }
 
 // CatchAll implements [receiver.Observer].
@@ -264,37 +270,49 @@ type instrumented struct {
 	m  *Metrics
 }
 
-// observe records an operation's duration and, if it failed, its error.
-func (i *instrumented) observe(operation string, start time.Time, err error) error {
-	i.m.duration.WithLabelValues(operation).Observe(time.Since(start).Seconds())
+// observe records an operation's duration and, if it failed, its error. When
+// ctx holds a sampled span, the duration carries its trace ID as an exemplar.
+func (i *instrumented) observe(ctx context.Context, operation string, start time.Time, err error) error {
+	observeWithTrace(ctx, i.m.duration.WithLabelValues(operation), time.Since(start).Seconds())
 	if err != nil {
 		i.m.observeError(operation, err)
 	}
 	return err
 }
 
+// observeWithTrace observes v, with the trace ID of the span in ctx as an
+// exemplar if that span is sampled, so a slow observation links to its trace.
+func observeWithTrace(ctx context.Context, o prometheus.Observer, v float64) {
+	sc := trace.SpanContextFromContext(ctx)
+	if eo, ok := o.(prometheus.ExemplarObserver); ok && sc.IsValid() && sc.IsSampled() {
+		eo.ObserveWithExemplar(v, prometheus.Labels{exemplarTraceIDLabel: sc.TraceID().String()})
+		return
+	}
+	o.Observe(v)
+}
+
 func (i *instrumented) OpenTickets(ctx context.Context, externalID string) ([]receiver.Ticket, error) {
 	start := time.Now()
 	t, err := i.at.OpenTickets(ctx, externalID)
-	return t, i.observe("open_tickets", start, err)
+	return t, i.observe(ctx, "open_tickets", start, err)
 }
 
 func (i *instrumented) PreviousTicket(ctx context.Context, externalID string) (*receiver.Ticket, error) {
 	start := time.Now()
 	t, err := i.at.PreviousTicket(ctx, externalID)
-	return t, i.observe("previous_ticket", start, err)
+	return t, i.observe(ctx, "previous_ticket", start, err)
 }
 
 func (i *instrumented) Ticket(ctx context.Context, id int64) (*receiver.Ticket, error) {
 	start := time.Now()
 	t, err := i.at.Ticket(ctx, id)
-	return t, i.observe("get_ticket", start, err)
+	return t, i.observe(ctx, "get_ticket", start, err)
 }
 
 func (i *instrumented) OpenAlertTickets(ctx context.Context) ([]receiver.Ticket, error) {
 	start := time.Now()
 	t, err := i.at.OpenAlertTickets(ctx)
-	return t, i.observe("open_alert_tickets", start, err)
+	return t, i.observe(ctx, "open_alert_tickets", start, err)
 }
 
 func (i *instrumented) CreateTicket(ctx context.Context, nt receiver.NewTicket) (receiver.Ticket, error) {
@@ -303,7 +321,7 @@ func (i *instrumented) CreateTicket(ctx context.Context, nt receiver.NewTicket) 
 	if err == nil {
 		i.m.ticketsCreated.Inc()
 	}
-	return t, i.observe("create_ticket", start, err)
+	return t, i.observe(ctx, "create_ticket", start, err)
 }
 
 func (i *instrumented) CreateNote(ctx context.Context, n receiver.NewNote) error {
@@ -312,11 +330,11 @@ func (i *instrumented) CreateNote(ctx context.Context, n receiver.NewNote) error
 	if err == nil {
 		i.m.notesCreated.Inc()
 	}
-	return i.observe("create_note", start, err)
+	return i.observe(ctx, "create_note", start, err)
 }
 
 func (i *instrumented) UpdateTicket(ctx context.Context, id int64, u receiver.TicketUpdate) error {
 	start := time.Now()
 	err := i.at.UpdateTicket(ctx, id, u)
-	return i.observe("update_ticket", start, err)
+	return i.observe(ctx, "update_ticket", start, err)
 }

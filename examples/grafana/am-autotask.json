@@ -687,7 +687,7 @@
       "id": 11,
       "type": "timeseries",
       "title": "Autotask request duration",
-      "description": "50th and 95th percentile duration of Autotask operations, including all pages and any read back.",
+      "description": "50th and 95th percentile duration of Autotask operations, including all pages and any read back. With tracing, exemplars on the 95th percentile link to traces.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -737,6 +737,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
+          "exemplar": true,
           "expr": "histogram_quantile(0.95, sum by (operation, le) (rate(am_autotask_autotask_request_duration_seconds_bucket{job=\"$job\", instance=~\"$instance\"}[$__rate_interval])))",
           "legendFormat": "p95 {{operation}}",
           "refId": "B"

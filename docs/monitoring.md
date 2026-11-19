@@ -37,7 +37,7 @@ All am-autotask metrics are prefixed `am_autotask_`. The standard Go runtime (`g
 | `am_autotask_leader` | gauge | | `1` while this replica handles notifications itself, otherwise `0`. With leader election that is while it holds the Lease; without, a ready instance is its own leader. Summed over replicas it should be `1`. |
 | `am_autotask_leader_transitions_total` | counter | | Times this replica became or stopped being the leader. Always zero without leader election. |
 | `am_autotask_forwarded_notifications_total` | counter | `result` | Notifications this standby forwarded to the leader, by result: `delivered` (the leader handled it), `leader_error` (the leader answered with an error, passed back to Alertmanager), `no_leader` (no replica held the Lease, so answered 503) or `unreachable` (answered 502). Always zero without leader election. |
-| `am_autotask_autotask_request_duration_seconds` | histogram | `operation` | Duration of Autotask operations made while handling notifications, with the same `operation` values as `am_autotask_autotask_errors_total`. An operation includes all of its pages and any read back, such as `create_ticket` reading the new ticket's number. |
+| `am_autotask_autotask_request_duration_seconds` | histogram | `operation` | Duration of Autotask operations made while handling notifications, with the same `operation` values as `am_autotask_autotask_errors_total`. An operation includes all of its pages and any read back, such as `create_ticket` reading the new ticket's number. When the operation's span is sampled, its observation carries the trace ID as a `trace_id` [exemplar](#exemplars). |
 
 ### Useful queries
 
@@ -95,7 +95,7 @@ Its rows are:
 
 - **Status**: am-autotask's own firing and pending alerts from the [alerting rules](#alerting-rules), readiness, which replica is the leader, the age of the company selectors and how many companies' selectors are valid. The alert list needs Grafana to read the rules from the data source, which it does for Prometheus and Mimir.
 - **Notifications**: notifications by result, the share failing, Alertmanager's failed webhook deliveries, and notifications standbys forwarded to the leader. Like the query above, Alertmanager's failures count every webhook receiver.
-- **Autotask**: request duration and errors by operation.
+- **Autotask**: request duration and errors by operation. The duration panel shows [exemplars](#exemplars) linking slow operations to their traces.
 - **Tickets** (collapsed): tickets and notes created, catch-all tickets, priority changes compared with overrides, orphaned tickets, recurrences by outcome, and ticket templates that failed. These don't need anyone to act on them straight away; use them to tune company selectors and `ticket.priorities`.
 
 When an alert fires, open its runbook below and use the dashboard to see when the problem started and how far it reaches.
@@ -107,6 +107,18 @@ With [tracing](../README.md#tracing) enabled, each notification is a trace conti
 - Search the logs for the warning or error, and open its `trace_id` in your tracing backend.
 - The `handle notification` span's `am_autotask.outcome` and `am_autotask.failure` attributes say what happened; its children show where the time went, for example waiting on another notification for the same alert group (`lock alert group`) or a slow Autotask operation.
 - `am_autotask.external_id` on the span is the ticket's `externalID`, so the trace and the Autotask ticket can be matched either way.
+
+### Exemplars
+
+Each observation of `am_autotask_autotask_request_duration_seconds` made in a sampled span carries that span's trace ID as an exemplar with the label `trace_id`, so a slow Autotask operation links straight to its trace instead of going through the logs. Observations in unsampled spans, or with tracing off and no trace context from Alertmanager, have no exemplar. With tracing off, an operation for a notification Alertmanager sent with a sampled trace context still carries Alertmanager's trace ID, but that trace has no am-autotask spans.
+
+Exemplars are only exposed when the scraper asks for OpenMetrics (or protobuf), which Prometheus does unless its `scrape_protocols` leave them out; the classic text format has none. To use them:
+
+- Prometheus in server mode must run with `--enable-feature=exemplar-storage`.
+- To send them on to remote storage, such as Mimir or Thanos Receive, set `send_exemplars: true` in the `remote_write` config. This applies to Prometheus in agent mode too.
+- In the Grafana Prometheus data source, add an exemplar link on the `trace_id` label to your tracing data source.
+
+The dashboard's **Autotask request duration** panel shows the exemplars on its 95th percentile query.
 
 ## Alerting rules
 
