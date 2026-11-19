@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.15.0](https://github.com/andrewheberle/am-autotask/compare/v0.14.1...v0.15.0) (2026-11-19)
+
+
+### Features
+
+* **metrics:** add trace exemplars to Autotask request duration ([#85](https://github.com/andrewheberle/am-autotask/issues/85)) ([809be43](https://github.com/andrewheberle/am-autotask/commit/809be431a4ecd23ae1059e561d46b335bd42ab71))
+
+
+### Bug Fixes
+
+* **deps:** update go toolchain directive to v1.27.4 ([#80](https://github.com/andrewheberle/am-autotask/issues/80)) ([3f22dad](https://github.com/andrewheberle/am-autotask/commit/3f22dad77dec5032526af51201926f6f2d19367e))
+* **deps:** update module github.com/andrewheberle/configger to v0.2.3 ([#82](https://github.com/andrewheberle/am-autotask/issues/82)) ([438d631](https://github.com/andrewheberle/am-autotask/commit/438d631ee09ed671450ffb81078858d41997851f))
+
 ## [0.14.1](https://github.com/andrewheberle/am-autotask/compare/v0.14.0...v0.14.1) (2026-11-04)
 
 
