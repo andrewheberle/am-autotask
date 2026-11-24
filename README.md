@@ -101,10 +101,26 @@ Every block in the templates file is executed against a sample notification at s
 The templates file is read at startup; restart to apply changes. To see what the templates produce without raising tickets, run:
 
 ```sh
-am-autotask templates --templates templates.tmpl [--notification webhook.json]
+am-autotask templates --templates templates.tmpl [--notification webhook.json | --alert-groups groups.json]
 ```
 
 This prints every block rendered for a built-in sample notification, or for an Alertmanager webhook payload saved as JSON, treating its firing alerts as a new ticket, all its alerts as a change note, and its ticket as a recurrence raising a problem ticket. Output is tidied and cut to Autotask's limits as on real tickets, and `.Severity` is found as `serve` finds it, from `ticket.severitylabel` and `ticket.severityorder` (see [Priority and severity](#priority-and-severity)). System notices are not shown. `templates` and the two severity settings are also read from `--config` and their `AM_AUTOTASK_*` environment variables, so `--config` with `serve`'s configuration file previews what `serve` would write.
+
+To see how a real alert would look, preview the alert groups Alertmanager holds now, straight from its API. `-` reads standard input, for `--notification` too:
+
+```sh
+curl -sG http://alertmanager:9093/api/v2/alerts/groups \
+    --data-urlencode receiver=autotask --data-urlencode 'filter=alertname="HostDown"' \
+  | am-autotask templates --config config.yaml --alert-groups - --external-url https://alertmanager.example.com
+```
+
+Each alert group is previewed under a heading naming its receiver and group labels. The API returns every receiver's groups, so narrow them down with its `receiver` and `filter` parameters (a label matcher, repeatable). Each group is turned into the notification Alertmanager would send:
+
+- Silenced and inhibited alerts are left out, as Alertmanager does not send them; a group with no others is shown as skipped, and the command fails if every group is.
+- The API returns no resolved alerts, so change notes show every alert as fired and none resolved. Use `--notification` or the built-in sample to preview resolved alerts.
+- The API does not give Alertmanager's external URL, so `.ExternalURL` and `.AlertmanagerURL` use the built-in sample's, `https://alertmanager.example.com`, unless `--external-url` gives the real one.
+
+A group whose templates fail shows the error in place of its blocks, the other groups are still previewed, and the command fails once all are printed.
 
 ## Autotask setup
 
