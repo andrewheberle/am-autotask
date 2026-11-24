@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.16.0](https://github.com/andrewheberle/am-autotask/compare/v0.15.0...v0.16.0) (2026-11-24)
+
+
+### Features
+
+* **templates:** preview alert groups from Alertmanager's API ([#92](https://github.com/andrewheberle/am-autotask/issues/92)) ([466081d](https://github.com/andrewheberle/am-autotask/commit/466081d01bc2aecce920e2b2efb622c418d60cee))
+
+
+### Bug Fixes
+
+* **deps:** update cgr.dev/chainguard/static:latest docker digest to 8658e9e ([#89](https://github.com/andrewheberle/am-autotask/issues/89)) ([4f3c3b6](https://github.com/andrewheberle/am-autotask/commit/4f3c3b63fc36d8f0f90b3d346ccf84d51b3f24c5))
+
 ## [0.15.0](https://github.com/andrewheberle/am-autotask/compare/v0.14.1...v0.15.0) (2026-11-19)
 
 
