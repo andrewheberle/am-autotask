@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/andrewheberle/am-autotask/compare/v0.16.0...v0.16.1) (2026-11-24)
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/prometheus/alertmanager to v0.35.0 ([#79](https://github.com/andrewheberle/am-autotask/issues/79)) ([0c6e829](https://github.com/andrewheberle/am-autotask/commit/0c6e8296e45b01744270613f533496e7116bb555))
+
 ## [0.16.0](https://github.com/andrewheberle/am-autotask/compare/v0.15.0...v0.16.0) (2026-11-24)
 
 
