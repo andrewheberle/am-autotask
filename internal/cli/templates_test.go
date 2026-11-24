@@ -27,12 +27,16 @@ func TestPreviewTemplates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	n, err := readNotification(payload)
+	b0, name, err := readInput(payload, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := parseNotification(b0, name)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var b strings.Builder
-	if err := previewTemplates(&b, tmpl, n, config.Preview{}); err != nil {
+	if err := previewTemplates(&b, tmpl, []previewGroup{{notification: n}}, config.Preview{}); err != nil {
 		t.Fatalf("previewTemplates: %v", err)
 	}
 
@@ -48,7 +52,33 @@ func TestPreviewTemplates(t *testing.T) {
 // writes to standard output.
 func runTemplates(t *testing.T, args ...string) string {
 	t.Helper()
+	out, err := runTemplatesWithInput(t, "", args...)
+	if err != nil {
+		t.Fatalf("templates %v: %v", args, err)
+	}
+	return out
+}
+
+// runTemplatesWithInput runs the templates command with args and stdin as
+// standard input, returning what it writes to standard output and its error.
+func runTemplatesWithInput(t *testing.T, stdin string, args ...string) (string, error) {
+	t.Helper()
 	t.Setenv("AM_AUTOTASK_CONFIG", "")
+
+	in, err := os.CreateTemp(t.TempDir(), "stdin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := in.WriteString(stdin); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := in.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = in.Close() }()
+	oldStdin := os.Stdin
+	os.Stdin = in
+	defer func() { os.Stdin = oldStdin }()
 
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -66,10 +96,7 @@ func runTemplates(t *testing.T, args ...string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runErr != nil {
-		t.Fatalf("templates %v: %v", args, runErr)
-	}
-	return string(out)
+	return string(out), runErr
 }
 
 func TestTemplatesPreviewUsesTheConfiguredSeverity(t *testing.T) {
