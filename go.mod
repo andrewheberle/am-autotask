@@ -8,7 +8,7 @@ require (
 	github.com/andrewheberle/configger v0.2.3
 	github.com/andrewheberle/simplecommand v0.8.0
 	github.com/bep/simplecobra v0.8.0
-	github.com/prometheus/alertmanager v0.35.0
+	github.com/prometheus/alertmanager v0.35.1
 	github.com/prometheus/client_golang v1.25.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.1.0
